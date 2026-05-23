@@ -1,0 +1,122 @@
+.app-shell {
+  margin: 0 auto;
+  max-width: 960px;
+  padding: 2rem 1rem 3rem;
+}
+
+.lead {
+  margin-bottom: 1.5rem;
+  color: #5f6270;
+}
+
+.card {
+  background: #fff;
+  border: 1px solid #d7dae2;
+  border-radius: 0.75rem;
+  margin-bottom: 1rem;
+  padding: 1rem;
+  text-align: left;
+}
+
+.toggle-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.chip,
+.primary {
+  border: 1px solid #3d59f2;
+  background: #f3f6ff;
+  color: #0f1e66;
+  border-radius: 999px;
+  padding: 0.45rem 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.chip.active {
+  background: #3d59f2;
+  color: #fff;
+}
+
+.field-grid {
+  display: grid;
+  gap: 0.8rem;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+label {
+  display: grid;
+  gap: 0.4rem;
+  font-weight: 600;
+}
+
+input {
+  border: 1px solid #b9bfce;
+  border-radius: 0.5rem;
+  padding: 0.55rem;
+  font-size: 0.95rem;
+}
+
+.action-row {
+  margin-top: 0.8rem;
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.source-row + .source-row {
+  border-top: 1px solid #ebeef5;
+  margin-top: 0.8rem;
+  padding-top: 0.8rem;
+}
+
+.metric-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+}
+
+.metric-grid article {
+  border: 1px solid #ebeef5;
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+}
+
+.metric-grid h3,
+.card h3 {
+  margin: 0 0 0.4rem;
+  font-size: 0.95rem;
+}
+
+.metric-grid p {
+  margin: 0;
+  font-size: 1.2rem;
+  font-weight: 700;
+}
+
+.positive p {
+  color: #0a8f40;
+}
+
+.negative p {
+  color: #b21717;
+}
+
+.card-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.card-list li {
+  border: 1px solid #ebeef5;
+  border-radius: 0.5rem;
+  padding: 0.6rem;
+  display: grid;
+  gap: 0.25rem;
+}
