@@ -8,13 +8,15 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
+    "backend:dev": "cd backend && uvicorn app.main:app --reload --port 8000",
     "collectr:install": "playwright install chromium",
     "collectr:export": "node scripts/export-collectr-portfolio.mjs",
     "collectr:export:headed": "node scripts/export-collectr-portfolio.mjs --headed"
   },
   "dependencies": {
     "react": "^19.2.6",
-    "react-dom": "^19.2.6"
+    "react-dom": "^19.2.6",
+    "react-plaid-link": "^4.1.1"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

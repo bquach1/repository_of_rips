@@ -37,6 +37,36 @@ npm install
 npm run dev
 ```
 
+## Plaid Backend (Venmo + Chase Spend)
+
+Python backend lives in `backend/` and provides endpoints for Plaid Link token creation, public token exchange, transaction sync, and spend totals.
+
+Quick start:
+
+```bash
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+uvicorn app.main:app --reload --port 8000
+```
+
+Or run from repo root:
+
+```bash
+npm run backend:dev
+```
+
+Main endpoints:
+
+- `POST /api/plaid/link-token`
+- `POST /api/plaid/exchange-public-token`
+- `POST /api/plaid/sync/{item_id}`
+- `GET /api/spend/summary`
+- `GET /api/spend/transactions`
+- `GET /api/spend/frontend-shape`
+
 ## Collectr Portfolio Export (Playwright)
 
 This repo includes a Playwright script that exports Collectr cards to JSON/CSV.

@@ -26,3 +26,12 @@ dist-ssr
 # Local secrets and scraping artifacts
 .env
 .auth/
+exports/
+requirements.txt
+
+# Python backend artifacts
+backend/.env
+backend/.venv/
+backend/__pycache__/
+backend/**/*.pyc
+backend/plaid_spend.db

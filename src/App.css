@@ -173,3 +173,93 @@
   margin: 0;
   color: #5f667a;
 }
+
+.spend-error {
+  color: #be1c24;
+}
+
+.spend-overview {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.spend-overview article {
+  border: 1px solid #edf0f8;
+  border-radius: 0.7rem;
+  padding: 0.75rem;
+}
+
+.spend-overview h3 {
+  font-size: 0.86rem;
+  margin-bottom: 0.35rem;
+  color: #636a7e;
+}
+
+.spend-overview p {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.transactions-list-wrap h3 {
+  margin: 0 0 0.5rem;
+}
+
+.transactions-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.transactions-list li {
+  border: 1px solid #edf0f8;
+  border-radius: 0.7rem;
+  padding: 0.55rem 0.7rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.7rem;
+}
+
+.tx-merchant {
+  margin: 0;
+  font-weight: 600;
+}
+
+.tx-meta {
+  margin: 0.1rem 0 0;
+  color: #6f7688;
+  font-size: 0.85rem;
+}
+
+.tx-amount {
+  margin: 0;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.plaid-connect p {
+  margin-top: 0;
+  color: #5f667a;
+}
+
+.plaid-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-bottom: 0.5rem;
+}
+
+.plaid-actions button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.plaid-status {
+  margin: 0;
+  font-size: 0.92rem;
+}
