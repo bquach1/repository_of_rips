@@ -17,18 +17,14 @@ React app for tracking card collection profit/loss by category (One Piece, Pokem
 Your backend spend endpoints should return either:
 
 ```json
-[
-  { "amount": 34.5, "game": "Pokemon" }
-]
+[{ "amount": 34.5, "game": "Pokemon" }]
 ```
 
 or:
 
 ```json
 {
-  "transactions": [
-    { "amount": 34.5, "category": "Pokemon" }
-  ]
+  "transactions": [{ "amount": 34.5, "category": "Pokemon" }]
 }
 ```
 
@@ -39,4 +35,75 @@ or:
 ```bash
 npm install
 npm run dev
+```
+
+## Collectr Portfolio Export (Playwright)
+
+This repo includes a Playwright script that exports Collectr cards to JSON/CSV.
+
+It is designed for public showcase profiles by default.
+
+### 1. Set profile URL (public showcase)
+
+Default URL:
+
+```bash
+https://app.getcollectr.com/showcase/profile/@palo90
+```
+
+You can override with `.env`:
+
+```bash
+COLLECTR_PORTFOLIO_URL=https://app.getcollectr.com/showcase/profile/@your_handle
+```
+
+### 2. (Optional) Add credentials only for private portfolio pages
+
+```bash
+COLLECTR_EMAIL=your_email_here
+COLLECTR_PASSWORD=your_password_here
+```
+
+### 3. Run export
+
+```bash
+# one-time browser install
+npm run collectr:install
+
+# headless (best for scheduled runs)
+npm run collectr:export
+
+# headed browser (best for first run / MFA challenges)
+npm run collectr:export:headed
+```
+
+Output files are written to `exports/`:
+
+- `collectr-portfolio-YYYY-MM-DD.json`
+- `collectr-portfolio-YYYY-MM-DD.csv`
+
+The latest JSON is also synced to `public/collectr-portfolio-latest.json` so the React UI can render the real export data directly.
+
+The script also saves login session state at `.auth/collectr-storage-state.json` to reduce repeated logins.
+
+### Optional flags
+
+```bash
+node scripts/export-collectr-portfolio.mjs --json-only
+node scripts/export-collectr-portfolio.mjs --csv-only
+node scripts/export-collectr-portfolio.mjs --headed
+node scripts/export-collectr-portfolio.mjs --out ./exports/weekly
+node scripts/export-collectr-portfolio.mjs --url https://app.getcollectr.com/showcase/profile/@your_handle
+```
+
+### Weekly schedule example (macOS `cron`)
+
+```bash
+crontab -e
+```
+
+Run every Sunday at 8:00 AM:
+
+```bash
+0 8 * * 0 cd /Users/brucequach/Projects/repository_of_rips && /usr/bin/env npm run collectr:export >> /Users/brucequach/Projects/repository_of_rips/exports/collectr-weekly.log 2>&1
 ```

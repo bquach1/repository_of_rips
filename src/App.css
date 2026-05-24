@@ -1,122 +1,175 @@
 .app-shell {
   margin: 0 auto;
-  max-width: 960px;
+  max-width: 1200px;
   padding: 2rem 1rem 3rem;
 }
 
-.lead {
-  margin-bottom: 1.5rem;
-  color: #5f6270;
-}
-
-.card {
-  background: #fff;
-  border: 1px solid #d7dae2;
-  border-radius: 0.75rem;
+.hero {
   margin-bottom: 1rem;
+}
+
+.hero h1 {
+  margin-bottom: 0.5rem;
+}
+
+.hero p {
+  margin-bottom: 0.4rem;
+  color: #4f5566;
+}
+
+.eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #3048c9;
+}
+
+.surface {
+  background: #fff;
+  border: 1px solid #dde2ef;
+  border-radius: 0.9rem;
   padding: 1rem;
-  text-align: left;
+  margin-bottom: 1rem;
 }
 
-.toggle-row {
+.surface h2,
+.surface h3 {
+  margin-bottom: 0.6rem;
+}
+
+.game-tabs {
   display: flex;
+  gap: 0.55rem;
   flex-wrap: wrap;
-  gap: 0.5rem;
 }
 
-.chip,
-.primary {
-  border: 1px solid #3d59f2;
-  background: #f3f6ff;
-  color: #0f1e66;
+.chip {
+  border: 1px solid #9aa9db;
+  background: #eef2ff;
+  color: #243164;
   border-radius: 999px;
-  padding: 0.45rem 0.9rem;
-  font-weight: 600;
+  padding: 0.45rem 0.95rem;
+  font-weight: 700;
   cursor: pointer;
 }
 
-.chip.active {
-  background: #3d59f2;
+.chip-active {
+  background: #2f4fda;
+  border-color: #2f4fda;
   color: #fff;
 }
 
-.field-grid {
+.stats-grid {
   display: grid;
-  gap: 0.8rem;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-}
-
-label {
-  display: grid;
-  gap: 0.4rem;
-  font-weight: 600;
-}
-
-input {
-  border: 1px solid #b9bfce;
-  border-radius: 0.5rem;
-  padding: 0.55rem;
-  font-size: 0.95rem;
-}
-
-.action-row {
-  margin-top: 0.8rem;
-  display: flex;
-  gap: 1rem;
-  flex-wrap: wrap;
-  align-items: center;
-}
-
-.source-row + .source-row {
-  border-top: 1px solid #ebeef5;
-  margin-top: 0.8rem;
-  padding-top: 0.8rem;
-}
-
-.metric-grid {
-  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 0.75rem;
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
 }
 
-.metric-grid article {
-  border: 1px solid #ebeef5;
-  border-radius: 0.5rem;
-  padding: 0.75rem;
+.stats-grid article {
+  border: 1px solid #edf0f8;
+  border-radius: 0.7rem;
+  padding: 0.8rem;
 }
 
-.metric-grid h3,
-.card h3 {
-  margin: 0 0 0.4rem;
-  font-size: 0.95rem;
+.stats-grid article h3 {
+  font-size: 0.88rem;
+  color: #636a7e;
 }
 
-.metric-grid p {
+.stats-grid article p {
   margin: 0;
-  font-size: 1.2rem;
+  font-size: 1.25rem;
   font-weight: 700;
 }
 
-.positive p {
-  color: #0a8f40;
+.delta-up {
+  color: #0f8b43;
 }
 
-.negative p {
-  color: #b21717;
+.delta-down {
+  color: #be1c24;
 }
 
-.card-list {
-  list-style: none;
-  padding: 0;
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 0.9rem;
+}
+
+.collectr-card {
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border: 1px solid #dde2ef;
+  border-radius: 0.85rem;
+  padding: 0.7rem;
+  box-shadow: 0 2px 10px rgba(16, 24, 40, 0.04);
+}
+
+.card-image-wrap {
+  border-radius: 0.6rem;
+  overflow: hidden;
+  background: linear-gradient(160deg, #f4f6fd, #ebf0ff);
+  border: 1px solid #edf0f8;
+}
+
+.card-image-wrap img {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  object-fit: contain;
+  display: block;
+}
+
+.card-body {
+  padding-top: 0.7rem;
+}
+
+.card-body h3 {
   margin: 0;
-  display: grid;
-  gap: 0.6rem;
+  font-size: 1rem;
+  line-height: 1.25;
 }
 
-.card-list li {
-  border: 1px solid #ebeef5;
-  border-radius: 0.5rem;
-  padding: 0.6rem;
-  display: grid;
-  gap: 0.25rem;
+.set-line {
+  margin: 0.35rem 0 0;
+  color: #5d6478;
+  text-decoration: underline;
+}
+
+.meta-line {
+  margin: 0.2rem 0 0;
+  color: #6f7688;
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.price-row {
+  margin-top: 0.5rem;
+}
+
+.price-main {
+  margin: 0;
+  font-weight: 800;
+  font-size: 1.18rem;
+}
+
+.price-row .delta-up,
+.price-row .delta-down {
+  margin: 0.12rem 0 0;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.qty {
+  margin: 0.35rem 0 0;
+  color: #2f4fda;
+  font-weight: 700;
+  font-size: 0.82rem;
+}
+
+.empty-state p {
+  margin: 0;
+  color: #5f667a;
 }

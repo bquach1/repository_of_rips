@@ -7,7 +7,10 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "collectr:install": "playwright install chromium",
+    "collectr:export": "node scripts/export-collectr-portfolio.mjs",
+    "collectr:export:headed": "node scripts/export-collectr-portfolio.mjs --headed"
   },
   "dependencies": {
     "react": "^19.2.6",
@@ -22,6 +25,7 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.6.0",
+    "playwright": "^1.60.0",
     "vite": "^8.0.12"
   }
 }
