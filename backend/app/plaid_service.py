@@ -76,7 +76,12 @@ def infer_source(
     account_name: str | None,
     merchant_name: str | None,
     description: str | None,
+    source_hint: str | None = None,
 ) -> str:
+    normalized_hint = (source_hint or "").strip().lower()
+    if normalized_hint in {"venmo", "chase", "other"}:
+        return normalized_hint
+
     mapped_source = get_account_source(account_id)
     if mapped_source:
         return mapped_source

@@ -37,6 +37,7 @@ def init_db() -> None:
                 item_id TEXT PRIMARY KEY,
                 access_token TEXT NOT NULL,
                 institution_name TEXT,
+                source_hint TEXT,
                 user_id TEXT NOT NULL,
                 created_at TEXT NOT NULL
             );
@@ -68,21 +69,41 @@ def init_db() -> None:
               ON transactions(source, date);
             """)
 
+        # Lightweight migration for existing local DBs.
+        columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(plaid_items)").fetchall()
+        }
+        if "source_hint" not in columns:
+            conn.execute("ALTER TABLE plaid_items ADD COLUMN source_hint TEXT")
+
 
 def upsert_plaid_item(
-    item_id: str, access_token: str, institution_name: str | None, user_id: str
+    item_id: str,
+    access_token: str,
+    institution_name: str | None,
+    user_id: str,
+    source_hint: str | None = None,
 ) -> None:
     with get_conn() as conn:
         conn.execute(
             """
-            INSERT INTO plaid_items(item_id, access_token, institution_name, user_id, created_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO plaid_items(item_id, access_token, institution_name, source_hint, user_id, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(item_id) DO UPDATE SET
                 access_token = excluded.access_token,
                 institution_name = excluded.institution_name,
+                source_hint = COALESCE(excluded.source_hint, plaid_items.source_hint),
                 user_id = excluded.user_id
             """,
-            (item_id, access_token, institution_name, user_id, utc_now_iso()),
+            (
+                item_id,
+                access_token,
+                institution_name,
+                source_hint,
+                user_id,
+                utc_now_iso(),
+            ),
         )
 
 
@@ -97,7 +118,7 @@ def get_item(item_id: str) -> dict | None:
 def list_items() -> list[dict]:
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT item_id, institution_name, user_id, created_at FROM plaid_items ORDER BY created_at DESC"
+            "SELECT item_id, institution_name, source_hint, user_id, created_at FROM plaid_items ORDER BY created_at DESC"
         ).fetchall()
     return [dict(r) for r in rows]
 
@@ -202,11 +223,57 @@ def query_spend_summary(
 
     with get_conn() as conn:
         total_row = conn.execute(
-            f"SELECT COALESCE(SUM(amount), 0) AS total_spend FROM transactions WHERE {where_sql}",
+            f"""
+            WITH filtered AS (
+                SELECT *
+                FROM transactions
+                WHERE {where_sql}
+            ), ranked AS (
+                SELECT
+                    *,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY
+                            source,
+                            date,
+                            amount,
+                            COALESCE(merchant_name, ''),
+                            COALESCE(description, '')
+                        ORDER BY updated_at DESC
+                    ) AS rn
+                FROM filtered
+            )
+            SELECT COALESCE(SUM(amount), 0) AS total_spend
+            FROM ranked
+            WHERE rn = 1
+            """,
             params,
         ).fetchone()
         by_source_rows = conn.execute(
-            f"SELECT source, COALESCE(SUM(amount), 0) AS total FROM transactions WHERE {where_sql} GROUP BY source ORDER BY total DESC",
+            f"""
+            WITH filtered AS (
+                SELECT *
+                FROM transactions
+                WHERE {where_sql}
+            ), ranked AS (
+                SELECT
+                    *,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY
+                            source,
+                            date,
+                            amount,
+                            COALESCE(merchant_name, ''),
+                            COALESCE(description, '')
+                        ORDER BY updated_at DESC
+                    ) AS rn
+                FROM filtered
+            )
+            SELECT source, COALESCE(SUM(amount), 0) AS total
+            FROM ranked
+            WHERE rn = 1
+            GROUP BY source
+            ORDER BY total DESC
+            """,
             params,
         ).fetchall()
 
@@ -240,19 +307,45 @@ def query_transactions(
         params.append(end_date)
 
     where_sql = " AND ".join(where)
-    params.append(limit)
+    query_params = [*params, limit]
 
     with get_conn() as conn:
         rows = conn.execute(
             f"""
-            SELECT plaid_transaction_id, source, date, amount, merchant_name, description,
-                   account_name, pending, iso_currency_code
-            FROM transactions
-            WHERE {where_sql}
-            ORDER BY date DESC
+            WITH filtered AS (
+                SELECT *
+                FROM transactions
+                WHERE {where_sql}
+            ), ranked AS (
+                SELECT
+                    *,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY
+                            source,
+                            date,
+                            amount,
+                            COALESCE(merchant_name, ''),
+                            COALESCE(description, '')
+                        ORDER BY updated_at DESC
+                    ) AS rn
+                FROM filtered
+            )
+            SELECT
+                plaid_transaction_id,
+                source,
+                date,
+                amount,
+                merchant_name,
+                description,
+                account_name,
+                pending,
+                iso_currency_code
+            FROM ranked
+            WHERE rn = 1
+            ORDER BY date DESC, updated_at DESC
             LIMIT ?
             """,
-            params,
+            query_params,
         ).fetchall()
 
     return [dict(r) for r in rows]

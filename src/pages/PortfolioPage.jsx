@@ -8,6 +8,8 @@ import {
   COLLECTR_EXPORT_PATH,
   normalizeCollectrExport,
 } from "../data/collectrCards";
+import { CARD_STORE_NAMES } from "../utils/constants";
+import { normalizeText } from "../utils/normalizationFunctions";
 
 const BACKEND_BASE_URL =
   import.meta.env.VITE_BACKEND_BASE_URL || "http://localhost:8000";
@@ -19,10 +21,6 @@ function PortfolioPage() {
   const [loadError, setLoadError] = useState("");
   const [spendStatus, setSpendStatus] = useState("loading");
   const [spendError, setSpendError] = useState("");
-  const [spendSummary, setSpendSummary] = useState({
-    total_spend: 0,
-    by_source: {},
-  });
   const [spendTransactions, setSpendTransactions] = useState([]);
 
   useEffect(() => {
@@ -58,13 +56,52 @@ function PortfolioPage() {
     };
   }, []);
 
+  const allowedStoreSet = useMemo(
+    () => new Set(CARD_STORE_NAMES.map((store) => normalizeText(store))),
+    [],
+  );
+
+  const cardStoreTransactions = useMemo(
+    () =>
+      spendTransactions.filter((tx) => {
+        const txName = normalizeText(tx.merchant_name || tx.description || "");
+        if (!txName) return false;
+
+        if (allowedStoreSet.has(txName)) return true;
+
+        for (const store of allowedStoreSet) {
+          if (txName.includes(store) || store.includes(txName)) return true;
+        }
+        return false;
+      }),
+    [spendTransactions, allowedStoreSet],
+  );
+
   const loadSpendData = useCallback(async () => {
     try {
+      const endDate = new Date();
+      const startDate = new Date();
+      startDate.setMonth(startDate.getMonth() - 2);
+
+      const formatDate = (value) => value.toISOString().slice(0, 10);
+      const dateParams = new URLSearchParams({
+        start_date: formatDate(startDate),
+        end_date: formatDate(endDate),
+      });
+
       const [summaryRes, txRes] = await Promise.all([
-        fetch(`${BACKEND_BASE_URL}/api/spend/summary`, { cache: "no-cache" }),
-        fetch(`${BACKEND_BASE_URL}/api/spend/transactions?limit=25`, {
-          cache: "no-cache",
-        }),
+        fetch(
+          `${BACKEND_BASE_URL}/api/spend/summary?${dateParams.toString()}`,
+          {
+            cache: "no-cache",
+          },
+        ),
+        fetch(
+          `${BACKEND_BASE_URL}/api/spend/transactions?${dateParams.toString()}&limit=1000`,
+          {
+            cache: "no-cache",
+          },
+        ),
       ]);
 
       if (!summaryRes.ok) {
@@ -74,16 +111,28 @@ function PortfolioPage() {
         throw new Error(`Spend transactions failed (${txRes.status})`);
       }
 
-      const summaryPayload = await summaryRes.json();
       const txPayload = await txRes.json();
+      const transactions = Array.isArray(txPayload.transactions)
+        ? txPayload.transactions
+        : [];
 
-      setSpendSummary({
-        total_spend: Number(summaryPayload.total_spend || 0),
-        by_source: summaryPayload.by_source || {},
+      const cardStoreTransactions = transactions.filter((tx) => {
+        const txName = String(
+          tx.merchant_name ||
+            tx.description ||
+            tx.name ||
+            tx.counterparty ||
+            "",
+        )
+          .toLowerCase()
+          .trim();
+
+        return CARD_STORE_NAMES.some((store) =>
+          txName.includes(store.toLowerCase()),
+        );
       });
-      setSpendTransactions(
-        Array.isArray(txPayload.transactions) ? txPayload.transactions : [],
-      );
+
+      setSpendTransactions(cardStoreTransactions);
       setSpendStatus("ready");
     } catch (error) {
       setSpendStatus("error");
@@ -111,6 +160,15 @@ function PortfolioPage() {
     [cards, selectedGame],
   );
 
+  const cardStoreTotalSpend = useMemo(
+    () =>
+      cardStoreTransactions.reduce(
+        (sum, tx) => sum + Number(tx.amount || 0),
+        0,
+      ),
+    [cardStoreTransactions],
+  );
+
   const totals = useMemo(() => {
     const totalQuantity = filteredCards.reduce(
       (sum, card) => sum + card.quantity,
@@ -120,10 +178,7 @@ function PortfolioPage() {
       (sum, card) => sum + card.marketPrice * card.quantity,
       0,
     );
-    const totalDelta = filteredCards.reduce(
-      (sum, card) => sum + card.priceDelta * card.quantity,
-      0,
-    );
+    const totalDelta = totalValue - cardStoreTotalSpend;
 
     return {
       cardCount: filteredCards.length,
@@ -131,15 +186,7 @@ function PortfolioPage() {
       totalValue,
       totalDelta,
     };
-  }, [filteredCards]);
-
-  const spendBreakdown = useMemo(
-    () =>
-      Object.entries(spendSummary.by_source || {}).sort(
-        (a, b) => Number(b[1]) - Number(a[1]),
-      ),
-    [spendSummary.by_source],
-  );
+  }, [filteredCards, cardStoreTotalSpend]);
 
   const money = (value) =>
     new Intl.NumberFormat("en-US", {
@@ -191,15 +238,9 @@ function PortfolioPage() {
               <>
                 <div className="spend-overview">
                   <article>
-                    <h3>Total Spend</h3>
-                    <p>{money(spendSummary.total_spend)}</p>
+                    <h3>Card Store Spend (2 Months)</h3>
+                    <p>{money(cardStoreTotalSpend)}</p>
                   </article>
-                  {spendBreakdown.map(([source, value]) => (
-                    <article key={source}>
-                      <h3>{source.toUpperCase()}</h3>
-                      <p>{money(value)}</p>
-                    </article>
-                  ))}
                 </div>
 
                 <div className="transactions-list-wrap">
@@ -234,7 +275,6 @@ function PortfolioPage() {
               </>
             )}
           </section>
-
           <section className="surface">
             <h2>Game</h2>
             <GameTabs

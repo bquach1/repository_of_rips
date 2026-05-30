@@ -8,6 +8,7 @@ function PlaidConnectPanel({ onLinked }) {
   const [linkToken, setLinkToken] = useState("");
   const [status, setStatus] = useState("idle");
   const [error, setError] = useState("");
+  const [sourceHint, setSourceHint] = useState("other");
 
   const createLinkToken = useCallback(async () => {
     try {
@@ -56,6 +57,7 @@ function PlaidConnectPanel({ onLinked }) {
               public_token: publicToken,
               institution_name: metadata?.institution?.name || null,
               user_id: "local-user",
+              source_hint: sourceHint,
             }),
           },
         );
@@ -131,6 +133,11 @@ function PlaidConnectPanel({ onLinked }) {
     }
   }, [status]);
 
+  const openWithSource = (nextSource) => {
+    setSourceHint(nextSource);
+    open();
+  };
+
   return (
     <section className="surface plaid-connect">
       <h2>Connect Venmo / Chase (Plaid)</h2>
@@ -143,10 +150,26 @@ function PlaidConnectPanel({ onLinked }) {
         <button
           type="button"
           className="chip chip-active"
-          onClick={() => open()}
+          onClick={() => openWithSource("venmo")}
           disabled={!ready || !linkToken}
         >
-          Connect Account
+          Connect Venmo
+        </button>
+        <button
+          type="button"
+          className="chip chip-active"
+          onClick={() => openWithSource("chase")}
+          disabled={!ready || !linkToken}
+        >
+          Connect Chase
+        </button>
+        <button
+          type="button"
+          className="chip"
+          onClick={() => openWithSource("other")}
+          disabled={!ready || !linkToken}
+        >
+          Connect Other Institution
         </button>
         <button type="button" className="chip" onClick={createLinkToken}>
           Refresh Link Token
@@ -154,6 +177,7 @@ function PlaidConnectPanel({ onLinked }) {
       </div>
 
       <p className="plaid-status">Status: {statusText}</p>
+      <p className="plaid-status">Source tag for next link: {sourceHint}</p>
       {error ? <p className="spend-error">{error}</p> : null}
     </section>
   );

@@ -5,12 +5,14 @@ from pydantic import BaseModel, Field
 
 class LinkTokenRequest(BaseModel):
     user_id: str = Field(default="local-user")
+    source_hint: str | None = None
 
 
 class ExchangePublicTokenRequest(BaseModel):
     public_token: str
     institution_name: str | None = None
     user_id: str = Field(default="local-user")
+    source_hint: str | None = None
 
 
 class SyncRequest(BaseModel):

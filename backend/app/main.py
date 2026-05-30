@@ -45,6 +45,7 @@ def _sync_item_internal(item_id: str) -> dict:
 
     access_token = item["access_token"]
     institution_name = item.get("institution_name")
+    source_hint = item.get("source_hint")
 
     cursor = None
     total_added = 0
@@ -77,6 +78,7 @@ def _sync_item_internal(item_id: str) -> dict:
                         account_name=tx.get("account_owner"),
                         merchant_name=tx.get("merchant_name"),
                         description=tx.get("name"),
+                        source_hint=source_hint,
                     ),
                     "raw": tx,
                 }
@@ -105,6 +107,7 @@ def _sync_item_internal(item_id: str) -> dict:
                         account_name=tx.get("account_owner"),
                         merchant_name=tx.get("merchant_name"),
                         description=tx.get("name"),
+                        source_hint=source_hint,
                     ),
                     "raw": tx,
                 }
@@ -196,6 +199,7 @@ def api_exchange_public_token(payload: ExchangePublicTokenRequest) -> dict:
             access_token=exchanged["access_token"],
             institution_name=payload.institution_name,
             user_id=payload.user_id,
+            source_hint=payload.source_hint,
         )
         return {"item_id": item_id}
     except Exception as exc:  # pragma: no cover
