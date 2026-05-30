@@ -1,12 +1,11 @@
-function money(value) {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 2,
-  }).format(value);
-}
+import { money } from "../utils/helpers";
 
-function PortfolioStats({ cardCount, totalQuantity, totalValue, totalDelta }) {
+export default function PortfolioStats({
+  cardCount,
+  totalQuantity,
+  totalValue,
+  totalDelta,
+}) {
   return (
     <section className="surface stats-grid" aria-label="Portfolio summary">
       <article>
@@ -28,5 +27,3 @@ function PortfolioStats({ cardCount, totalQuantity, totalValue, totalDelta }) {
     </section>
   );
 }
-
-export default PortfolioStats;

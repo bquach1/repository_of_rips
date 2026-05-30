@@ -1,12 +1,6 @@
-function money(value) {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 2,
-  }).format(value);
-}
+import { money } from "../utils/helpers";
 
-function CollectrCard({ card }) {
+export default function CollectrCard({ card }) {
   const deltaClass = card.priceDelta >= 0 ? "delta-up" : "delta-down";
   const deltaSign = card.priceDelta >= 0 ? "+" : "";
 
@@ -44,5 +38,3 @@ function CollectrCard({ card }) {
     </article>
   );
 }
-
-export default CollectrCard;
