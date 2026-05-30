@@ -26,6 +26,7 @@ from .schemas import (
     LinkTokenRequest,
 )
 from .settings import settings
+from .venmo_classifier import classify_venmo_transaction
 
 app = FastAPI(title="Plaid Spend Backend", version="0.1.0")
 
@@ -171,6 +172,32 @@ def _maybe_auto_sync(
     }
 
 
+def _enrich_card_related(rows: list[dict]) -> list[dict]:
+    enriched: list[dict] = []
+    for tx in rows:
+        if (tx.get("source") or "").lower() == "venmo":
+            result = classify_venmo_transaction(tx)
+            tx_with_meta = {
+                **tx,
+                "is_card_related": result.is_card_related,
+                "venmo_counterparty": result.counterparty,
+                "venmo_card_keyword_matches": result.keyword_matches,
+                "venmo_classification_reason": result.reason,
+                "venmo_classification_confidence": result.confidence,
+            }
+            enriched.append(tx_with_meta)
+            continue
+
+        enriched.append(
+            {
+                **tx,
+                "is_card_related": False,
+            }
+        )
+
+    return enriched
+
+
 @app.on_event("startup")
 def startup() -> None:
     init_db()
@@ -291,13 +318,16 @@ def api_spend_transactions(
             include_pending=include_pending,
         )
 
-    rows = query_transactions(
-        source=normalized_source,
-        start_date=start_date,
-        end_date=end_date,
-        include_pending=include_pending,
-        limit=limit,
+    rows = _enrich_card_related(
+        query_transactions(
+            source=normalized_source,
+            start_date=start_date,
+            end_date=end_date,
+            include_pending=include_pending,
+            limit=limit,
+        )
     )
+
     return {
         "transactions": rows,
         "auto_sync": auto_sync,
@@ -335,6 +365,7 @@ def api_spend_frontend_shape(
         include_pending=include_pending,
         limit=5000,
     )
+    rows = _enrich_card_related(rows)
 
     payload = [
         {
@@ -342,6 +373,7 @@ def api_spend_frontend_shape(
             "category": tx["source"].capitalize(),
             "description": tx.get("description") or tx.get("merchant_name") or "",
             "date": tx["date"],
+            "is_card_related": tx.get("is_card_related", False),
         }
         for tx in rows
     ]

@@ -46,6 +46,11 @@ uvicorn app.main:app --reload --port 8000
 - Data is stored in SQLite (`backend/plaid_spend.db` by default).
 - Spend summary counts positive transaction amounts (`amount > 0`).
 - `source` is inferred by text matching (`venmo`, `chase`) unless overridden via `/api/accounts/source-map`.
+- Venmo transactions are enriched with `is_card_related` and supporting metadata using:
+  - known counterparties (`VENMO_CARD_COUNTERPARTIES`)
+  - card keywords (`VENMO_CARD_KEYWORDS`)
+  - non-card keywords (`VENMO_NON_CARD_KEYWORDS`)
+  - optional AI fallback for ambiguous notes (`VENMO_AI_ENABLED=true`, `OPENAI_API_KEY`, `OPENAI_MODEL`)
 - Recommended flow:
   1. `POST /api/plaid/link-token`
   2. Frontend Plaid Link receives `public_token`

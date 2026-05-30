@@ -14,6 +14,61 @@ import { normalizeText } from "../utils/normalizationFunctions";
 const BACKEND_BASE_URL =
   import.meta.env.VITE_BACKEND_BASE_URL || "http://localhost:8000";
 
+function dedupeTransactions(transactions) {
+  const seen = new Set();
+
+  return transactions.filter((tx) => {
+    const normalizedName = normalizeText(
+      tx.merchant_name || tx.description || tx.name || tx.counterparty || "",
+    );
+
+    const key =
+      tx.plaid_transaction_id ||
+      [
+        tx.source || "other",
+        tx.date || "",
+        tx.amount || 0,
+        normalizedName,
+      ].join("|");
+
+    if (seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
+}
+
+function dedupeByAccountTimestamp(transactions) {
+  const seen = new Set();
+
+  return transactions.filter((tx) => {
+    const normalizedName = normalizeText(
+      tx.merchant_name || tx.description || tx.name || tx.counterparty || "",
+    );
+
+    const accountStamp = String(tx.account_name || "").trim();
+    const dedupeKey = [
+      accountStamp,
+      tx.date || "",
+      Number(tx.amount || 0),
+      normalizedName,
+    ].join("|");
+
+    if (!accountStamp) {
+      return true;
+    }
+
+    if (seen.has(dedupeKey)) {
+      return false;
+    }
+
+    seen.add(dedupeKey);
+    return true;
+  });
+}
+
 function PortfolioPage() {
   const [selectedGame, setSelectedGame] = useState("All");
   const [cards, setCards] = useState([]);
@@ -22,6 +77,7 @@ function PortfolioPage() {
   const [spendStatus, setSpendStatus] = useState("loading");
   const [spendError, setSpendError] = useState("");
   const [spendTransactions, setSpendTransactions] = useState([]);
+  const [venmoTransactions, setVenmoTransactions] = useState([]);
 
   useEffect(() => {
     let active = true;
@@ -89,7 +145,7 @@ function PortfolioPage() {
         end_date: formatDate(endDate),
       });
 
-      const [summaryRes, txRes] = await Promise.all([
+      const [summaryRes, txRes, venmoRes] = await Promise.all([
         fetch(
           `${BACKEND_BASE_URL}/api/spend/summary?${dateParams.toString()}`,
           {
@@ -102,6 +158,12 @@ function PortfolioPage() {
             cache: "no-cache",
           },
         ),
+        fetch(
+          `${BACKEND_BASE_URL}/api/spend/transactions?${dateParams.toString()}&source=venmo&limit=1000`,
+          {
+            cache: "no-cache",
+          },
+        ),
       ]);
 
       if (!summaryRes.ok) {
@@ -110,29 +172,27 @@ function PortfolioPage() {
       if (!txRes.ok) {
         throw new Error(`Spend transactions failed (${txRes.status})`);
       }
+      if (!venmoRes.ok) {
+        throw new Error(`Venmo transactions failed (${venmoRes.status})`);
+      }
 
       const txPayload = await txRes.json();
       const transactions = Array.isArray(txPayload.transactions)
         ? txPayload.transactions
         : [];
+      const venmoPayload = await venmoRes.json();
+      const venmoTransactionsRaw = Array.isArray(venmoPayload.transactions)
+        ? venmoPayload.transactions
+        : [];
+      const dedupedTransactions = dedupeByAccountTimestamp(
+        dedupeTransactions(transactions),
+      );
+      const dedupedVenmoTransactions = dedupeByAccountTimestamp(
+        dedupeTransactions(venmoTransactionsRaw),
+      );
 
-      const cardStoreTransactions = transactions.filter((tx) => {
-        const txName = String(
-          tx.merchant_name ||
-            tx.description ||
-            tx.name ||
-            tx.counterparty ||
-            "",
-        )
-          .toLowerCase()
-          .trim();
-
-        return CARD_STORE_NAMES.some((store) =>
-          txName.includes(store.toLowerCase()),
-        );
-      });
-
-      setSpendTransactions(cardStoreTransactions);
+      setSpendTransactions(dedupedTransactions);
+      setVenmoTransactions(dedupedVenmoTransactions);
       setSpendStatus("ready");
     } catch (error) {
       setSpendStatus("error");
@@ -169,6 +229,38 @@ function PortfolioPage() {
     [cardStoreTransactions],
   );
 
+  const venmoBreakdown = useMemo(() => {
+    return venmoTransactions.reduce(
+      (acc, tx) => {
+        const description = normalizeText(
+          tx.description || tx.merchant_name || "",
+        );
+        const isStandardTransfer = description.includes("standard transfer");
+        const keywordMatches = Array.isArray(tx.venmo_card_keyword_matches)
+          ? tx.venmo_card_keyword_matches
+          : [];
+        const amount = Number(tx.amount || 0);
+
+        if (isStandardTransfer) {
+          acc.profit += amount;
+          return acc;
+        }
+
+        if (keywordMatches.length > 0) {
+          acc.loss += amount;
+        }
+
+        return acc;
+      },
+      { profit: 0, loss: 0 },
+    );
+  }, [venmoTransactions]);
+
+  const venmoNet = useMemo(
+    () => venmoBreakdown.loss - venmoBreakdown.profit,
+    [venmoBreakdown],
+  );
+
   const totals = useMemo(() => {
     const totalQuantity = filteredCards.reduce(
       (sum, card) => sum + card.quantity,
@@ -178,7 +270,11 @@ function PortfolioPage() {
       (sum, card) => sum + card.marketPrice * card.quantity,
       0,
     );
-    const totalDelta = totalValue - cardStoreTotalSpend;
+    const totalDelta =
+      totalValue -
+      cardStoreTotalSpend -
+      venmoBreakdown.loss +
+      venmoBreakdown.profit;
 
     return {
       cardCount: filteredCards.length,
@@ -186,7 +282,7 @@ function PortfolioPage() {
       totalValue,
       totalDelta,
     };
-  }, [filteredCards, cardStoreTotalSpend]);
+  }, [filteredCards, cardStoreTotalSpend, venmoBreakdown]);
 
   const money = (value) =>
     new Intl.NumberFormat("en-US", {
@@ -241,15 +337,27 @@ function PortfolioPage() {
                     <h3>Card Store Spend (2 Months)</h3>
                     <p>{money(cardStoreTotalSpend)}</p>
                   </article>
+                  <article>
+                    <h3>Venmo Loss (Keyword/Card-Related)</h3>
+                    <p>{money(venmoBreakdown.loss)}</p>
+                  </article>
+                  <article>
+                    <h3>Venmo Profit (Standard Transfer)</h3>
+                    <p>{money(venmoBreakdown.profit)}</p>
+                  </article>
+                  <article>
+                    <h3>Venmo Net Impact (2 Months)</h3>
+                    <p>{money(venmoNet)}</p>
+                  </article>
                 </div>
 
                 <div className="transactions-list-wrap">
                   <h3>Recent Transactions</h3>
-                  {spendTransactions.length === 0 ? (
+                  {cardStoreTransactions.length === 0 ? (
                     <p>No spend transactions synced yet.</p>
                   ) : (
                     <ul className="transactions-list">
-                      {spendTransactions.slice(0, 10).map((tx) => (
+                      {cardStoreTransactions.slice(0, 10).map((tx) => (
                         <li
                           key={
                             tx.plaid_transaction_id ||

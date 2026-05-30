@@ -3,7 +3,6 @@ export const CARD_STORE_NAMES = [
   "Common Ground Games",
   "Mystery Mtg",
   "Cardquest",
-  "Target",
   "Hill Top Collectibles",
   "Trading Card World",
   "Opcg",
@@ -11,4 +10,5 @@ export const CARD_STORE_NAMES = [
   "Lspb",
   "Andyseous Odyssey",
   "Zenith Tcg",
+  "Riot Games",
 ];

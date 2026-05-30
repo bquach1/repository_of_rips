@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePlaidLink } from "react-plaid-link";
 
 const BACKEND_BASE_URL =
@@ -9,6 +9,7 @@ function PlaidConnectPanel({ onLinked }) {
   const [status, setStatus] = useState("idle");
   const [error, setError] = useState("");
   const [sourceHint, setSourceHint] = useState("other");
+  const sourceHintRef = useRef("other");
 
   const createLinkToken = useCallback(async () => {
     try {
@@ -57,7 +58,7 @@ function PlaidConnectPanel({ onLinked }) {
               public_token: publicToken,
               institution_name: metadata?.institution?.name || null,
               user_id: "local-user",
-              source_hint: sourceHint,
+              source_hint: sourceHintRef.current,
             }),
           },
         );
@@ -134,6 +135,7 @@ function PlaidConnectPanel({ onLinked }) {
   }, [status]);
 
   const openWithSource = (nextSource) => {
+    sourceHintRef.current = nextSource;
     setSourceHint(nextSource);
     open();
   };
