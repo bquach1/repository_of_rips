@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -8,6 +10,7 @@ from .database import (
     get_item,
     init_db,
     list_items,
+    query_transaction_date_bounds,
     query_spend_summary,
     query_transactions,
     set_account_source,
@@ -39,6 +42,10 @@ app.add_middleware(
 )
 
 
+def _pretty_debug(label: str, payload: object) -> None:
+    print(f"[{label}]\n{json.dumps(payload, indent=2, sort_keys=True, default=str)}")
+
+
 def _sync_item_internal(item_id: str) -> dict:
     item = get_item(item_id)
     if not item:
@@ -54,11 +61,29 @@ def _sync_item_internal(item_id: str) -> dict:
     total_removed = 0
 
     while True:
-        response = sync_transactions(access_token=access_token, cursor=cursor)
+        request_cursor = cursor
+        response = sync_transactions(access_token=access_token, cursor=request_cursor)
         cursor = response.get("next_cursor")
 
         for tx in response.get("added", []):
             account_id = tx.get("account_id", "")
+            source = infer_source(
+                institution_name=institution_name,
+                account_id=account_id,
+                account_name=tx.get("account_owner"),
+                merchant_name=tx.get("merchant_name"),
+                description=tx.get("name"),
+                source_hint=source_hint,
+            )
+
+            if source == "venmo":
+                amount = float(tx.get("amount") or 0)
+                direction = "non_negative" if amount >= 0 else "negative"
+                _pretty_debug(
+                    f"RAW_VENMO_TX added amount={amount} sign={direction}",
+                    tx,
+                )
+
             upsert_transaction(
                 {
                     "plaid_transaction_id": tx["transaction_id"],
@@ -73,14 +98,7 @@ def _sync_item_internal(item_id: str) -> dict:
                     "iso_currency_code": tx.get("iso_currency_code") or "USD",
                     "date": tx.get("date"),
                     "pending": bool(tx.get("pending")),
-                    "source": infer_source(
-                        institution_name=institution_name,
-                        account_id=account_id,
-                        account_name=tx.get("account_owner"),
-                        merchant_name=tx.get("merchant_name"),
-                        description=tx.get("name"),
-                        source_hint=source_hint,
-                    ),
+                    "source": source,
                     "raw": tx,
                 }
             )
@@ -88,6 +106,22 @@ def _sync_item_internal(item_id: str) -> dict:
 
         for tx in response.get("modified", []):
             account_id = tx.get("account_id", "")
+            source = infer_source(
+                institution_name=institution_name,
+                account_id=account_id,
+                account_name=tx.get("account_owner"),
+                merchant_name=tx.get("merchant_name"),
+                description=tx.get("name"),
+                source_hint=source_hint,
+            )
+            if source == "venmo":
+                amount = float(tx.get("amount") or 0)
+                direction = "non_negative" if amount >= 0 else "negative"
+                _pretty_debug(
+                    f"RAW_VENMO_TX modified amount={amount} sign={direction}",
+                    tx,
+                )
+
             upsert_transaction(
                 {
                     "plaid_transaction_id": tx["transaction_id"],
@@ -102,14 +136,7 @@ def _sync_item_internal(item_id: str) -> dict:
                     "iso_currency_code": tx.get("iso_currency_code") or "USD",
                     "date": tx.get("date"),
                     "pending": bool(tx.get("pending")),
-                    "source": infer_source(
-                        institution_name=institution_name,
-                        account_id=account_id,
-                        account_name=tx.get("account_owner"),
-                        merchant_name=tx.get("merchant_name"),
-                        description=tx.get("name"),
-                        source_hint=source_hint,
-                    ),
+                    "source": source,
                     "raw": tx,
                 }
             )
@@ -143,12 +170,28 @@ def _maybe_auto_sync(
         limit=1,
     )
     if existing:
-        return {
-            "auto_sync_attempted": False,
-            "auto_sync_performed": False,
-            "linked_items": len(list_items()),
-            "auto_sync_results": [],
-        }
+        bounds = query_transaction_date_bounds(
+            source=source,
+            include_pending=include_pending,
+        )
+        needs_sync_for_range = False
+
+        if bounds:
+            min_date = bounds.get("min_date")
+            max_date = bounds.get("max_date")
+
+            if start_date and min_date and start_date < min_date:
+                needs_sync_for_range = True
+            if end_date and max_date and end_date > max_date:
+                needs_sync_for_range = True
+
+        if not needs_sync_for_range:
+            return {
+                "auto_sync_attempted": False,
+                "auto_sync_performed": False,
+                "linked_items": len(list_items()),
+                "auto_sync_results": [],
+            }
 
     items = list_items()
     if not items:
@@ -318,15 +361,16 @@ def api_spend_transactions(
             include_pending=include_pending,
         )
 
-    rows = _enrich_card_related(
-        query_transactions(
-            source=normalized_source,
-            start_date=start_date,
-            end_date=end_date,
-            include_pending=include_pending,
-            limit=limit,
-        )
+    queried_rows = query_transactions(
+        source=normalized_source,
+        start_date=start_date,
+        end_date=end_date,
+        include_pending=include_pending,
+        limit=limit,
     )
+    _pretty_debug("query_transactions result", queried_rows)
+
+    rows = _enrich_card_related(queried_rows)
 
     return {
         "transactions": rows,

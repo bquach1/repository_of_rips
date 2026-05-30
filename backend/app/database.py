@@ -207,7 +207,7 @@ def delete_transactions_by_ids(transaction_ids: list[str]) -> int:
 def query_spend_summary(
     start_date: str | None, end_date: str | None, include_pending: bool
 ) -> dict:
-    where = ["amount > 0"]
+    where: list[str] = []
     params: list[object] = []
 
     if not include_pending:
@@ -219,7 +219,7 @@ def query_spend_summary(
         where.append("date <= ?")
         params.append(end_date)
 
-    where_sql = " AND ".join(where)
+    where_sql = " AND ".join(where) if where else "1=1"
 
     with get_conn() as conn:
         total_row = conn.execute(
@@ -291,7 +291,7 @@ def query_transactions(
     include_pending: bool,
     limit: int,
 ) -> list[dict]:
-    where = ["amount > 0"]
+    where: list[str] = []
     params: list[object] = []
 
     if source:
@@ -306,7 +306,7 @@ def query_transactions(
         where.append("date <= ?")
         params.append(end_date)
 
-    where_sql = " AND ".join(where)
+    where_sql = " AND ".join(where) if where else "1=1"
     query_params = [*params, limit]
 
     with get_conn() as conn:
@@ -349,3 +349,41 @@ def query_transactions(
         ).fetchall()
 
     return [dict(r) for r in rows]
+
+
+def query_transaction_date_bounds(
+    source: str | None,
+    include_pending: bool,
+) -> dict | None:
+    where: list[str] = []
+    params: list[object] = []
+
+    if source:
+        where.append("source = ?")
+        params.append(source)
+    if not include_pending:
+        where.append("pending = 0")
+
+    where_sql = " AND ".join(where) if where else "1=1"
+
+    with get_conn() as conn:
+        row = conn.execute(
+            f"""
+            SELECT
+                MIN(date) AS min_date,
+                MAX(date) AS max_date,
+                COUNT(*) AS total_rows
+            FROM transactions
+            WHERE {where_sql}
+            """,
+            params,
+        ).fetchone()
+
+    if not row or int(row["total_rows"] or 0) == 0:
+        return None
+
+    return {
+        "min_date": row["min_date"],
+        "max_date": row["max_date"],
+        "total_rows": int(row["total_rows"] or 0),
+    }

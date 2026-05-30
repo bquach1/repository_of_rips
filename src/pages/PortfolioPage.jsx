@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Button, Segmented } from "antd";
 import CollectrCardGrid from "../components/CollectrCardGrid";
 import GameTabs from "../components/GameTabs";
 import PlaidConnectPanel from "../components/PlaidConnectPanel";
@@ -13,6 +14,11 @@ import { normalizeText } from "../utils/normalizationFunctions";
 
 const BACKEND_BASE_URL =
   import.meta.env.VITE_BACKEND_BASE_URL || "http://localhost:8000";
+
+const SPEND_FETCH_LIMIT = 1000;
+const MAX_RECENT_RECORDS = 100;
+const RECENT_TRANSACTIONS_PAGE_SIZE = 10;
+const CARD_GRID_PAGE_SIZE = 25;
 
 function dedupeTransactions(transactions) {
   const seen = new Set();
@@ -69,6 +75,12 @@ function dedupeByAccountTimestamp(transactions) {
   });
 }
 
+function toTime(value) {
+  if (!value) return Number.POSITIVE_INFINITY;
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? Number.POSITIVE_INFINITY : parsed;
+}
+
 function PortfolioPage() {
   const [selectedGame, setSelectedGame] = useState("All");
   const [cards, setCards] = useState([]);
@@ -78,6 +90,8 @@ function PortfolioPage() {
   const [spendError, setSpendError] = useState("");
   const [spendTransactions, setSpendTransactions] = useState([]);
   const [venmoTransactions, setVenmoTransactions] = useState([]);
+  const [recentView, setRecentView] = useState({ source: "chase", page: 1 });
+  const [cardGridPage, setCardGridPage] = useState(1);
 
   useEffect(() => {
     let active = true;
@@ -153,13 +167,13 @@ function PortfolioPage() {
           },
         ),
         fetch(
-          `${BACKEND_BASE_URL}/api/spend/transactions?${dateParams.toString()}&limit=1000`,
+          `${BACKEND_BASE_URL}/api/spend/transactions?${dateParams.toString()}&limit=${SPEND_FETCH_LIMIT}`,
           {
             cache: "no-cache",
           },
         ),
         fetch(
-          `${BACKEND_BASE_URL}/api/spend/transactions?${dateParams.toString()}&source=venmo&limit=1000`,
+          `${BACKEND_BASE_URL}/api/spend/transactions?${dateParams.toString()}&source=venmo&limit=${SPEND_FETCH_LIMIT}`,
           {
             cache: "no-cache",
           },
@@ -220,6 +234,23 @@ function PortfolioPage() {
     [cards, selectedGame],
   );
 
+  const totalCardPages = Math.max(
+    1,
+    Math.ceil(filteredCards.length / CARD_GRID_PAGE_SIZE),
+  );
+
+  const currentCardPage = Math.min(cardGridPage, totalCardPages);
+
+  const paginatedCards = useMemo(() => {
+    const start = (currentCardPage - 1) * CARD_GRID_PAGE_SIZE;
+    return filteredCards.slice(start, start + CARD_GRID_PAGE_SIZE);
+  }, [currentCardPage, filteredCards]);
+
+  const onSelectGame = useCallback((game) => {
+    setSelectedGame(game);
+    setCardGridPage(1);
+  }, []);
+
   const cardStoreTotalSpend = useMemo(
     () =>
       cardStoreTransactions.reduce(
@@ -230,36 +261,120 @@ function PortfolioPage() {
   );
 
   const venmoBreakdown = useMemo(() => {
-    return venmoTransactions.reduce(
-      (acc, tx) => {
-        const description = normalizeText(
-          tx.description || tx.merchant_name || "",
-        );
-        const isStandardTransfer = description.includes("standard transfer");
-        const keywordMatches = Array.isArray(tx.venmo_card_keyword_matches)
-          ? tx.venmo_card_keyword_matches
-          : [];
-        const amount = Number(tx.amount || 0);
+    const sorted = [...venmoTransactions].sort((a, b) => {
+      const dateDiff = toTime(a.date) - toTime(b.date);
+      if (dateDiff !== 0) return dateDiff;
+      return Number(a.amount || 0) - Number(b.amount || 0);
+    });
 
-        if (isStandardTransfer) {
-          acc.profit += amount;
-          return acc;
+    const cardIncomingPool = [];
+    let loss = 0;
+    let profit = 0;
+
+    for (const tx of sorted) {
+      const description = normalizeText(
+        tx.description || tx.merchant_name || "",
+      );
+      const isStandardTransfer = description.includes("standard transfer");
+      const keywordMatches = Array.isArray(tx.venmo_card_keyword_matches)
+        ? tx.venmo_card_keyword_matches
+        : [];
+      const amount = Number(tx.amount || 0);
+
+      if (!Number.isFinite(amount) || amount === 0) {
+        continue;
+      }
+
+      if (isStandardTransfer) {
+        if (amount <= 0) {
+          continue;
         }
 
-        if (keywordMatches.length > 0) {
-          acc.loss += amount;
+        let remainingTransfer = amount;
+
+        for (const candidate of cardIncomingPool) {
+          if (remainingTransfer <= 0) {
+            break;
+          }
+          if (candidate.unmatched <= 0) {
+            continue;
+          }
+
+          const matchAmount = Math.min(candidate.unmatched, remainingTransfer);
+          candidate.unmatched -= matchAmount;
+          remainingTransfer -= matchAmount;
+          profit += matchAmount;
         }
 
-        return acc;
-      },
-      { profit: 0, loss: 0 },
-    );
+        continue;
+      }
+
+      if (keywordMatches.length > 0) {
+        if (amount < 0) {
+          loss += Math.abs(amount);
+        } else {
+          cardIncomingPool.push({ unmatched: amount });
+        }
+      }
+    }
+
+    return { profit, loss };
   }, [venmoTransactions]);
 
   const venmoNet = useMemo(
     () => venmoBreakdown.loss - venmoBreakdown.profit,
     [venmoBreakdown],
   );
+
+  const sortTransactionsNewestFirst = useCallback((transactions) => {
+    return [...transactions].sort((a, b) => {
+      const dateDiff = toTime(b.date) - toTime(a.date);
+      if (dateDiff !== 0) return dateDiff;
+      return Number(b.amount || 0) - Number(a.amount || 0);
+    });
+  }, []);
+
+  const chaseRecentTransactions = useMemo(
+    () =>
+      sortTransactionsNewestFirst(cardStoreTransactions).slice(
+        0,
+        MAX_RECENT_RECORDS,
+      ),
+    [cardStoreTransactions, sortTransactionsNewestFirst],
+  );
+
+  const venmoRecentTransactions = useMemo(
+    () =>
+      sortTransactionsNewestFirst(
+        venmoTransactions.filter((tx) => {
+          const keywordMatches = Array.isArray(tx.venmo_card_keyword_matches)
+            ? tx.venmo_card_keyword_matches
+            : [];
+          return keywordMatches.length > 0;
+        }),
+      ).slice(0, MAX_RECENT_RECORDS),
+    [venmoTransactions, sortTransactionsNewestFirst],
+  );
+
+  const recentTransactions =
+    recentView.source === "venmo"
+      ? venmoRecentTransactions
+      : chaseRecentTransactions;
+
+  const totalRecentPages = Math.max(
+    1,
+    Math.ceil(recentTransactions.length / RECENT_TRANSACTIONS_PAGE_SIZE),
+  );
+
+  const recentPage = Math.min(recentView.page, totalRecentPages);
+
+  const paginatedRecentTransactions = useMemo(() => {
+    const start = (recentPage - 1) * RECENT_TRANSACTIONS_PAGE_SIZE;
+    return recentTransactions.slice(
+      start,
+      start + RECENT_TRANSACTIONS_PAGE_SIZE,
+    );
+  }, [recentPage, recentTransactions]);
 
   const totals = useMemo(() => {
     const totalQuantity = filteredCards.reduce(
@@ -342,7 +457,7 @@ function PortfolioPage() {
                     <p>{money(venmoBreakdown.loss)}</p>
                   </article>
                   <article>
-                    <h3>Venmo Profit (Standard Transfer)</h3>
+                    <h3>Venmo Profit (Matched Standard Transfer)</h3>
                     <p>{money(venmoBreakdown.profit)}</p>
                   </article>
                   <article>
@@ -353,31 +468,77 @@ function PortfolioPage() {
 
                 <div className="transactions-list-wrap">
                   <h3>Recent Transactions</h3>
-                  {cardStoreTransactions.length === 0 ? (
-                    <p>No spend transactions synced yet.</p>
+                  <div className="transactions-filter-group">
+                    <Segmented
+                      options={[
+                        { label: "Chase", value: "chase" },
+                        { label: "Venmo", value: "venmo" },
+                      ]}
+                      value={recentView.source}
+                      onChange={(value) =>
+                        setRecentView({ source: String(value), page: 1 })
+                      }
+                    />
+                  </div>
+
+                  {recentTransactions.length === 0 ? (
+                    <p>
+                      No {recentView.source === "venmo" ? "Venmo" : "Chase"}{" "}
+                      transactions synced yet.
+                    </p>
                   ) : (
-                    <ul className="transactions-list">
-                      {cardStoreTransactions.slice(0, 10).map((tx) => (
-                        <li
-                          key={
-                            tx.plaid_transaction_id ||
-                            `${tx.date}-${tx.amount}-${tx.description}`
+                    <>
+                      <ul className="transactions-list">
+                        {paginatedRecentTransactions.map((tx, index) => (
+                          <li
+                            key={
+                              tx.plaid_transaction_id ||
+                              `${recentView.source}-${tx.date}-${tx.amount}-${tx.description}-${index}`
+                            }
+                          >
+                            <div>
+                              <p className="tx-merchant">
+                                {tx.merchant_name ||
+                                  tx.description ||
+                                  "Transaction"}
+                              </p>
+                              <p className="tx-meta">
+                                {(tx.source || "other").toUpperCase()} •{" "}
+                                {tx.date}
+                              </p>
+                            </div>
+                            <p className="tx-amount">{money(tx.amount)}</p>
+                          </li>
+                        ))}
+                      </ul>
+                      <div className="transactions-pagination">
+                        <Button
+                          onClick={() =>
+                            setRecentView((view) => ({
+                              ...view,
+                              page: Math.max(1, recentPage - 1),
+                            }))
                           }
+                          disabled={recentPage === 1}
                         >
-                          <div>
-                            <p className="tx-merchant">
-                              {tx.merchant_name ||
-                                tx.description ||
-                                "Transaction"}
-                            </p>
-                            <p className="tx-meta">
-                              {(tx.source || "other").toUpperCase()} • {tx.date}
-                            </p>
-                          </div>
-                          <p className="tx-amount">{money(tx.amount)}</p>
-                        </li>
-                      ))}
-                    </ul>
+                          Previous
+                        </Button>
+                        <p>
+                          Page {recentPage} of {totalRecentPages}
+                        </p>
+                        <Button
+                          onClick={() =>
+                            setRecentView((view) => ({
+                              ...view,
+                              page: Math.min(totalRecentPages, recentPage + 1),
+                            }))
+                          }
+                          disabled={recentPage === totalRecentPages}
+                        >
+                          Next
+                        </Button>
+                      </div>
+                    </>
                   )}
                 </div>
               </>
@@ -388,12 +549,39 @@ function PortfolioPage() {
             <GameTabs
               games={games}
               selectedGame={selectedGame}
-              onSelectGame={setSelectedGame}
+              onSelectGame={onSelectGame}
             />
           </section>
 
           <PortfolioStats {...totals} />
-          <CollectrCardGrid cards={filteredCards} />
+          <CollectrCardGrid cards={paginatedCards} />
+          {filteredCards.length > 0 && (
+            <section className="surface card-grid-pagination-wrap">
+              <div className="card-grid-pagination">
+                <Button
+                  onClick={() =>
+                    setCardGridPage(Math.max(1, currentCardPage - 1))
+                  }
+                  disabled={currentCardPage === 1}
+                >
+                  Previous
+                </Button>
+                <p>
+                  Cards Page {currentCardPage} of {totalCardPages}
+                </p>
+                <Button
+                  onClick={() =>
+                    setCardGridPage(
+                      Math.min(totalCardPages, currentCardPage + 1),
+                    )
+                  }
+                  disabled={currentCardPage === totalCardPages}
+                >
+                  Next
+                </Button>
+              </div>
+            </section>
+          )}
         </>
       )}
     </main>

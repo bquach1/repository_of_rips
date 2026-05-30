@@ -14,6 +14,7 @@
     "collectr:export:headed": "node scripts/export-collectr-portfolio.mjs --headed"
   },
   "dependencies": {
+    "antd": "^6.4.3",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "react-plaid-link": "^4.1.1"
