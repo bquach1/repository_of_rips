@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -42,10 +40,6 @@ app.add_middleware(
 )
 
 
-def _pretty_debug(label: str, payload: object) -> None:
-    print(f"[{label}]\n{json.dumps(payload, indent=2, sort_keys=True, default=str)}")
-
-
 def _sync_item_internal(item_id: str) -> dict:
     item = get_item(item_id)
     if not item:
@@ -79,10 +73,6 @@ def _sync_item_internal(item_id: str) -> dict:
             if source == "venmo":
                 amount = float(tx.get("amount") or 0)
                 direction = "non_negative" if amount >= 0 else "negative"
-                _pretty_debug(
-                    f"RAW_VENMO_TX added amount={amount} sign={direction}",
-                    tx,
-                )
 
             upsert_transaction(
                 {
@@ -116,12 +106,6 @@ def _sync_item_internal(item_id: str) -> dict:
             )
             if source == "venmo":
                 amount = float(tx.get("amount") or 0)
-                direction = "non_negative" if amount >= 0 else "negative"
-                _pretty_debug(
-                    f"RAW_VENMO_TX modified amount={amount} sign={direction}",
-                    tx,
-                )
-
             upsert_transaction(
                 {
                     "plaid_transaction_id": tx["transaction_id"],
@@ -368,7 +352,6 @@ def api_spend_transactions(
         include_pending=include_pending,
         limit=limit,
     )
-    _pretty_debug("query_transactions result", queried_rows)
 
     rows = _enrich_card_related(queried_rows)
 

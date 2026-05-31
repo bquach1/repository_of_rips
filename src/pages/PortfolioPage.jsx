@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Button, Segmented } from "antd";
+import { Button, Segmented, Spin } from "antd";
 import CollectrCardGrid from "../components/CollectrCardGrid";
 import GameTabs from "../components/GameTabs";
 import PlaidConnectPanel from "../components/PlaidConnectPanel";
@@ -10,7 +10,13 @@ import {
   normalizeCollectrExport,
 } from "../data/collectrCards";
 import { CARD_STORE_NAMES } from "../utils/constants";
-import { normalizeText } from "../utils/normalizationFunctions";
+import {
+  normalizeText,
+  money,
+  toTime,
+  dedupeTransactions,
+  dedupeByAccountTimestamp,
+} from "../utils/helpers";
 
 const BACKEND_BASE_URL =
   import.meta.env.VITE_BACKEND_BASE_URL || "http://localhost:8000";
@@ -20,68 +26,7 @@ const MAX_RECENT_RECORDS = 100;
 const RECENT_TRANSACTIONS_PAGE_SIZE = 10;
 const CARD_GRID_PAGE_SIZE = 25;
 
-function dedupeTransactions(transactions) {
-  const seen = new Set();
-
-  return transactions.filter((tx) => {
-    const normalizedName = normalizeText(
-      tx.merchant_name || tx.description || tx.name || tx.counterparty || "",
-    );
-
-    const key =
-      tx.plaid_transaction_id ||
-      [
-        tx.source || "other",
-        tx.date || "",
-        tx.amount || 0,
-        normalizedName,
-      ].join("|");
-
-    if (seen.has(key)) {
-      return false;
-    }
-
-    seen.add(key);
-    return true;
-  });
-}
-
-function dedupeByAccountTimestamp(transactions) {
-  const seen = new Set();
-
-  return transactions.filter((tx) => {
-    const normalizedName = normalizeText(
-      tx.merchant_name || tx.description || tx.name || tx.counterparty || "",
-    );
-
-    const accountStamp = String(tx.account_name || "").trim();
-    const dedupeKey = [
-      accountStamp,
-      tx.date || "",
-      Number(tx.amount || 0),
-      normalizedName,
-    ].join("|");
-
-    if (!accountStamp) {
-      return true;
-    }
-
-    if (seen.has(dedupeKey)) {
-      return false;
-    }
-
-    seen.add(dedupeKey);
-    return true;
-  });
-}
-
-function toTime(value) {
-  if (!value) return Number.POSITIVE_INFINITY;
-  const parsed = Date.parse(value);
-  return Number.isNaN(parsed) ? Number.POSITIVE_INFINITY : parsed;
-}
-
-function PortfolioPage() {
+export default function PortfolioPage() {
   const [selectedGame, setSelectedGame] = useState("All");
   const [cards, setCards] = useState([]);
   const [loadStatus, setLoadStatus] = useState("loading");
@@ -399,25 +344,29 @@ function PortfolioPage() {
     };
   }, [filteredCards, cardStoreTotalSpend, venmoBreakdown]);
 
-  const money = (value) =>
-    new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: "USD",
-      maximumFractionDigits: 2,
-    }).format(Number(value || 0));
-
   return (
     <main className="app-shell">
       <header className="hero">
-        <p className="eyebrow">Collectr Portfolio</p>
-        <h1>Market Snapshot</h1>
-        <p>Card pricing cards rendered from your live Collectr export JSON.</p>
+        <p className="eyebrow">Repository of Rips</p>
+        <h1>TCG Portfolio Tracker/Spend Analyzer</h1>
+        <p>
+          A TCG portfolio and spend analysis tool to keep myself responsible.
+          Card data and values are sourced from public Collectr data on the web,
+          and financial data connects to Venmo/Chase spend via Plaid.
+        </p>
       </header>
 
       {loadStatus === "loading" && (
-        <section className="surface">
-          <h2>Loading portfolio data...</h2>
-        </section>
+        <Spin
+          tip="Loading portfolio data..."
+          size="large"
+          className="loading-spinner"
+          style={{
+            display: "flex",
+            justifyContent: "center",
+            margin: "2rem 0",
+          }}
+        />
       )}
 
       {loadStatus === "error" && (
@@ -433,7 +382,6 @@ function PortfolioPage() {
       {loadStatus === "ready" && (
         <>
           <PlaidConnectPanel onLinked={refreshSpendData} />
-
           <section className="surface">
             <h2>Spend Sync Snapshot</h2>
             {spendStatus === "loading" && (
@@ -552,7 +500,6 @@ function PortfolioPage() {
               onSelectGame={onSelectGame}
             />
           </section>
-
           <PortfolioStats {...totals} />
           <CollectrCardGrid cards={paginatedCards} />
           {filteredCards.length > 0 && (
@@ -587,5 +534,3 @@ function PortfolioPage() {
     </main>
   );
 }
-
-export default PortfolioPage;
