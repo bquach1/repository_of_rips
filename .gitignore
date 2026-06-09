@@ -27,7 +27,6 @@ dist-ssr
 .env
 .auth/
 exports/
-requirements.txt
 
 # Python backend artifacts
 backend/.env
