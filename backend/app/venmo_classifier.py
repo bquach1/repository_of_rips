@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from typing import Any
 from urllib import error, request
@@ -48,6 +49,14 @@ def _match_counterparty(text: str, counterparties: list[str]) -> str:
 def _find_keyword_matches(text: str, keywords: list[str]) -> list[str]:
     matches: list[str] = []
     for keyword in keywords:
+        # Support regex-style keywords (for example grouped patterns with\n+        # alternation or digit classes), while still handling plain phrases.
+        try:
+            if re.search(keyword, text, flags=re.IGNORECASE):
+                matches.append(keyword)
+                continue
+        except re.error:
+            pass
+
         if _contains_phrase(text, keyword):
             matches.append(keyword)
     return matches

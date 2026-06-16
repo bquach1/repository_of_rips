@@ -10,6 +10,7 @@ from plaid.model.item_public_token_exchange_request import (
 from plaid.model.link_token_create_request import LinkTokenCreateRequest
 from plaid.model.link_token_create_request_user import LinkTokenCreateRequestUser
 from plaid.model.products import Products
+from plaid.model.item_remove_request import ItemRemoveRequest
 from plaid.model.transactions_sync_request import TransactionsSyncRequest
 
 from .database import get_account_source
@@ -38,7 +39,7 @@ def get_plaid_client() -> plaid_api.PlaidApi:
     return plaid_api.PlaidApi(api_client)
 
 
-def create_link_token(user_id: str) -> dict:
+def create_link_token(user_id: str, access_token: str | None = None) -> dict:
     client = get_plaid_client()
     payload = {
         "user": LinkTokenCreateRequestUser(client_user_id=user_id),
@@ -58,6 +59,11 @@ def create_link_token(user_id: str) -> dict:
     ):
         payload["redirect_uri"] = settings.plaid_redirect_uri
 
+    # If access_token is provided, Plaid Link runs in update mode for an existing item
+    # instead of creating a brand-new item.
+    if access_token:
+        payload["access_token"] = access_token
+
     req = LinkTokenCreateRequest(**payload)
     response = client.link_token_create(req)
     return response.to_dict()
@@ -70,6 +76,13 @@ def exchange_public_token(public_token: str) -> dict:
     return response.to_dict()
 
 
+def remove_item(access_token: str) -> dict:
+    client = get_plaid_client()
+    req = ItemRemoveRequest(access_token=access_token)
+    response = client.item_remove(req)
+    return response.to_dict()
+
+
 def infer_source(
     institution_name: str | None,
     account_id: str,
@@ -79,8 +92,12 @@ def infer_source(
     source_hint: str | None = None,
 ) -> str:
     normalized_hint = (source_hint or "").strip().lower()
-    if normalized_hint in {"venmo", "chase", "other"}:
-        return normalized_hint
+    institution_text = " ".join((institution_name or "").strip().lower().split())
+    is_venmo_personal_institution = institution_text in {
+        "venmo - personal",
+        "venmo personal",
+    }
+    is_chase_institution = "chase" in institution_text
 
     mapped_source = get_account_source(account_id)
     if mapped_source:
@@ -95,8 +112,35 @@ def infer_source(
         ]
     ).lower()
 
-    if "venmo" in text:
+    if normalized_hint == "chase":
+        return "chase"
+
+    # Only the dedicated Venmo Personal link can contribute Venmo charges.
+    if is_venmo_personal_institution:
         return "venmo"
+
+    # Chase-linked institutions should default to chase even if source_hint
+    # was historically saved as "other".
+    if is_chase_institution:
+        return "chase"
+
+    # Some bank-side entries (for example credit card payments) can live in
+    # the same linked item but are not Venmo activity.
+    non_venmo_markers = [
+        "ccpymt",
+        "card payment",
+        "credit card payment",
+        "wells fargo card",
+    ]
+    if any(marker in text for marker in non_venmo_markers):
+        if "chase" in text:
+            return "chase"
+        return "other"
+
+    # Keep zelle classification scoped to explicitly zelle-tagged links.
+    if normalized_hint == "zelle" and "zelle" in text:
+        return "zelle"
+
     if "chase" in text:
         return "chase"
     return "other"

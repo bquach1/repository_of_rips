@@ -1,17 +1,24 @@
 from __future__ import annotations
 
+import json
+import logging
+import re
+
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from .database import (
+    delete_item_and_transactions,
     delete_transactions_by_ids,
     get_item,
     init_db,
+    list_transactions_for_item,
     list_items,
     query_transaction_date_bounds,
     query_spend_summary,
     query_transactions,
     set_account_source,
+    update_transaction_source,
     upsert_plaid_item,
     upsert_transaction,
 )
@@ -19,15 +26,20 @@ from .plaid_service import (
     create_link_token,
     exchange_public_token,
     infer_source,
+    remove_item,
     sync_transactions,
 )
 from .schemas import (
     AccountSourceMapRequest,
+    CleanupPlaidItemsRequest,
     ExchangePublicTokenRequest,
     LinkTokenRequest,
+    ReclassifySourcesRequest,
 )
 from .settings import settings
 from .venmo_classifier import classify_venmo_transaction
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Plaid Spend Backend", version="0.1.0")
 
@@ -70,9 +82,10 @@ def _sync_item_internal(item_id: str) -> dict:
                 source_hint=source_hint,
             )
 
-            if source == "venmo":
-                amount = float(tx.get("amount") or 0)
-                direction = "non_negative" if amount >= 0 else "negative"
+            if source == "zelle":
+                _log_zelle_transaction(
+                    tx=tx, item_id=item_id, institution_name=institution_name
+                )
 
             upsert_transaction(
                 {
@@ -104,8 +117,10 @@ def _sync_item_internal(item_id: str) -> dict:
                 description=tx.get("name"),
                 source_hint=source_hint,
             )
-            if source == "venmo":
-                amount = float(tx.get("amount") or 0)
+            if source == "zelle":
+                _log_zelle_transaction(
+                    tx=tx, item_id=item_id, institution_name=institution_name
+                )
             upsert_transaction(
                 {
                     "plaid_transaction_id": tx["transaction_id"],
@@ -138,6 +153,58 @@ def _sync_item_internal(item_id: str) -> dict:
         "modified": total_modified,
         "removed": total_removed,
     }
+
+
+def _extract_zelle_counterparty(description: str, merchant_name: str) -> str:
+    text = (description or "").strip()
+    merchant = (merchant_name or "").strip()
+
+    patterns = [
+        r"zelle\s+(?:payment|transfer)?\s*to\s+(.+)$",
+        r"zelle\s+(?:payment|transfer)?\s*from\s+(.+)$",
+        r"(?:to|from)\s+(.+?)\s+zelle",
+    ]
+    lowered = text.lower()
+    for pattern in patterns:
+        match = re.search(pattern, lowered)
+        if not match:
+            continue
+
+        raw_counterparty = match.group(1).strip(" .,-")
+        if raw_counterparty:
+            return raw_counterparty.title()
+
+    if merchant and merchant.lower() != "zelle":
+        return merchant
+
+    return ""
+
+
+def _log_zelle_transaction(
+    tx: dict, item_id: str, institution_name: str | None
+) -> None:
+    amount = float(tx.get("amount") or 0)
+    description = str(tx.get("name") or "")
+    merchant_name = str(tx.get("merchant_name") or "")
+    account_owner = str(tx.get("account_owner") or "")
+    counterparty = _extract_zelle_counterparty(description, merchant_name)
+    direction = "sent" if amount >= 0 else "received"
+
+    payload = {
+        "event": "zelle_transaction_detected",
+        "item_id": item_id,
+        "institution_name": institution_name,
+        "plaid_transaction_id": tx.get("transaction_id"),
+        "date": tx.get("date"),
+        "amount": amount,
+        "direction": direction,
+        "counterparty": counterparty,
+        "description": description,
+        "merchant_name": merchant_name,
+        "account_owner": account_owner,
+        "raw": tx,
+    }
+    logger.info(json.dumps(payload, separators=(",", ":"), default=str))
 
 
 def _maybe_auto_sync(
@@ -238,8 +305,42 @@ def health() -> dict:
 @app.post("/api/plaid/link-token")
 def api_create_link_token(payload: LinkTokenRequest) -> dict:
     try:
-        return create_link_token(payload.user_id)
+        reconnect_item = None
+
+        if payload.reconnect_item_id:
+            reconnect_item = get_item(payload.reconnect_item_id)
+            if not reconnect_item:
+                raise HTTPException(status_code=404, detail="Unknown reconnect_item_id")
+            if reconnect_item.get("user_id") != payload.user_id:
+                raise HTTPException(
+                    status_code=403,
+                    detail="reconnect_item_id does not belong to this user",
+                )
+        elif payload.source_hint and not payload.force_new:
+            normalized_hint = payload.source_hint.strip().lower()
+            candidates = [
+                item
+                for item in list_items()
+                if item.get("user_id") == payload.user_id
+                and (item.get("source_hint") or "").strip().lower() == normalized_hint
+            ]
+            if candidates:
+                reconnect_item = get_item(candidates[0]["item_id"])
+
+        response = create_link_token(
+            user_id=payload.user_id,
+            access_token=(reconnect_item or {}).get("access_token"),
+        )
+
+        if reconnect_item:
+            response["reconnect_item_id"] = reconnect_item["item_id"]
+            response["mode"] = "update"
+        else:
+            response["mode"] = "new"
+        return response
     except Exception as exc:  # pragma: no cover
+        if isinstance(exc, HTTPException):
+            raise
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
@@ -265,6 +366,150 @@ def api_list_items() -> dict:
     return {"items": list_items()}
 
 
+@app.post("/api/plaid/cleanup-duplicates")
+def api_cleanup_duplicate_items(payload: CleanupPlaidItemsRequest) -> dict:
+    items = [item for item in list_items() if item.get("user_id") == payload.user_id]
+
+    grouped: dict[tuple[str, str], list[dict]] = {}
+    for item in items:
+        source_key = (item.get("source_hint") or "other").strip().lower()
+        institution_key = (item.get("institution_name") or "").strip().lower()
+        group_key = (source_key, institution_key)
+        grouped.setdefault(group_key, []).append(item)
+
+    keep_item_ids: set[str] = set()
+    candidate_duplicates: list[dict] = []
+
+    for group_items in grouped.values():
+        sorted_group = sorted(
+            group_items,
+            key=lambda row: row.get("created_at") or "",
+            reverse=True,
+        )
+        if not sorted_group:
+            continue
+        keep_item_ids.add(sorted_group[0]["item_id"])
+        candidate_duplicates.extend(sorted_group[1:])
+
+    removed_items: list[dict] = []
+    skipped_items: list[dict] = []
+
+    for item in candidate_duplicates:
+        item_id = item["item_id"]
+        item_record = get_item(item_id)
+        if not item_record:
+            skipped_items.append(
+                {
+                    "item_id": item_id,
+                    "reason": "Item no longer exists",
+                }
+            )
+            continue
+
+        if payload.dry_run:
+            removed_items.append(
+                {
+                    "item_id": item_id,
+                    "institution_name": item.get("institution_name"),
+                    "source_hint": item.get("source_hint") or "other",
+                    "removed_from_plaid": False,
+                    "removed_local": False,
+                    "dry_run": True,
+                }
+            )
+            continue
+
+        plaid_removed = False
+        if payload.remove_from_plaid:
+            try:
+                remove_item(item_record["access_token"])
+                plaid_removed = True
+            except Exception as exc:  # pragma: no cover
+                skipped_items.append(
+                    {
+                        "item_id": item_id,
+                        "reason": f"Plaid remove failed: {exc}",
+                    }
+                )
+                continue
+
+        local_result = delete_item_and_transactions(item_id)
+        removed_items.append(
+            {
+                "item_id": item_id,
+                "institution_name": item.get("institution_name"),
+                "source_hint": item.get("source_hint") or "other",
+                "removed_from_plaid": plaid_removed,
+                "removed_local": bool(local_result["item_deleted"]),
+                "transactions_deleted": local_result["transactions_deleted"],
+            }
+        )
+
+    return {
+        "user_id": payload.user_id,
+        "dry_run": payload.dry_run,
+        "remove_from_plaid": payload.remove_from_plaid,
+        "total_items": len(items),
+        "kept_items": len(keep_item_ids),
+        "duplicate_candidates": len(candidate_duplicates),
+        "removed_count": len(removed_items),
+        "skipped_count": len(skipped_items),
+        "removed_items": removed_items,
+        "skipped_items": skipped_items,
+    }
+
+
+@app.post("/api/plaid/reclassify-sources")
+def api_reclassify_sources(payload: ReclassifySourcesRequest) -> dict:
+    items = [item for item in list_items() if item.get("user_id") == payload.user_id]
+
+    checked_count = 0
+    updated_count = 0
+    updates: list[dict] = []
+
+    for item in items:
+        item_id = item["item_id"]
+        institution_name = item.get("institution_name")
+        source_hint = item.get("source_hint")
+
+        rows = list_transactions_for_item(item_id)
+        for row in rows:
+            checked_count += 1
+            next_source = infer_source(
+                institution_name=institution_name,
+                account_id=row.get("account_id") or "",
+                account_name=row.get("account_name"),
+                merchant_name=row.get("merchant_name"),
+                description=row.get("description"),
+                source_hint=source_hint,
+            )
+            previous_source = (row.get("source") or "other").lower()
+            if next_source == previous_source:
+                continue
+
+            updated_count += 1
+            updates.append(
+                {
+                    "plaid_transaction_id": row["plaid_transaction_id"],
+                    "item_id": item_id,
+                    "from": previous_source,
+                    "to": next_source,
+                }
+            )
+
+            if not payload.dry_run:
+                update_transaction_source(row["plaid_transaction_id"], next_source)
+
+    return {
+        "user_id": payload.user_id,
+        "dry_run": payload.dry_run,
+        "linked_items": len(items),
+        "checked_transactions": checked_count,
+        "updated_transactions": updated_count,
+        "updates": updates,
+    }
+
+
 @app.post("/api/plaid/sync/{item_id}")
 def api_sync_item(item_id: str) -> dict:
     try:
@@ -276,8 +521,10 @@ def api_sync_item(item_id: str) -> dict:
 @app.post("/api/accounts/source-map")
 def api_set_account_source(payload: AccountSourceMapRequest) -> dict:
     source = payload.source.lower().strip()
-    if source not in {"venmo", "chase", "other"}:
-        raise HTTPException(status_code=400, detail="source must be venmo|chase|other")
+    if source not in {"venmo", "chase", "zelle", "other"}:
+        raise HTTPException(
+            status_code=400, detail="source must be venmo|chase|zelle|other"
+        )
 
     set_account_source(payload.account_id, source)
     return {"status": "ok", "account_id": payload.account_id, "source": source}
@@ -328,8 +575,15 @@ def api_spend_transactions(
     auto_sync: bool = Query(default=True),
 ) -> dict:
     normalized_source = source.lower() if source else None
-    if normalized_source and normalized_source not in {"venmo", "chase", "other"}:
-        raise HTTPException(status_code=400, detail="source must be venmo|chase|other")
+    if normalized_source and normalized_source not in {
+        "venmo",
+        "chase",
+        "zelle",
+        "other",
+    }:
+        raise HTTPException(
+            status_code=400, detail="source must be venmo|chase|zelle|other"
+        )
 
     auto_sync_meta = {
         "auto_sync_attempted": False,

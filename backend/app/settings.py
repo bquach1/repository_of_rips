@@ -39,6 +39,19 @@ def env_csv(name: str, default: str = "") -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
+def env_keyword_list(name: str, default: str = "") -> list[str]:
+    raw = env_str(name, default)
+    if not raw:
+        return []
+
+    # Preserve regex blobs such as
+    # (card|...|op\d{2,4}-?\d{3,4}) without splitting on quantifier commas.
+    if raw.startswith("(") and raw.endswith(")"):
+        return [raw]
+
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
 @dataclass
 class Settings:
     plaid_client_id: str = env_str("PLAID_CLIENT_ID")
@@ -63,9 +76,9 @@ class Settings:
             "VENMO_CARD_COUNTERPARTIES",
             "William Ng,Sheshasai Sairam,Allyson Suandi",
         )
-        self.venmo_card_keywords = env_csv(
+        self.venmo_card_keywords = env_keyword_list(
             "VENMO_CARD_KEYWORDS",
-            "card,cards,tcg,pokemon,one piece,riftbound,booster,pack,box,single,slab,psa,bgs,cgc,whatnot,tcgplayer,collectr,rip",
+            "(card|cards|tcg|pokemon|one piece|riftbound|booster|pack|box|single|slab|psa|bgs|cgc|whatnot|tcgplayer|collectr|rip|op\d{2,4}|op\d{2,4}-?\d{3,4})",
         )
         self.venmo_non_card_keywords = env_csv(
             "VENMO_NON_CARD_KEYWORDS",

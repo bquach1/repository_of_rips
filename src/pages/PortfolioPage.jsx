@@ -25,6 +25,51 @@ const SPEND_FETCH_LIMIT = 1000;
 const MAX_RECENT_RECORDS = 100;
 const RECENT_TRANSACTIONS_PAGE_SIZE = 10;
 const CARD_GRID_PAGE_SIZE = 25;
+const MANUAL_ZELLE_RECEIVED = 40 - 7;
+
+function parseZelleTransaction(tx) {
+  const description = String(tx.description || tx.merchant_name || "").trim();
+  const normalizedDescription = normalizeText(description);
+  const amount = Number(tx.amount || 0);
+  const direction = amount >= 0 ? "Sent" : "Received";
+
+  const patterns = [
+    /zelle\s+(?:payment|transfer)?\s*to\s+(.+)$/i,
+    /zelle\s+(?:payment|transfer)?\s*from\s+(.+)$/i,
+    /(?:to|from)\s+(.+?)\s+zelle/i,
+  ];
+
+  let counterparty = "";
+  for (const pattern of patterns) {
+    const match = description.match(pattern);
+    if (match?.[1]) {
+      counterparty = match[1].replace(/[.,\-\s]+$/g, "").trim();
+      if (counterparty) break;
+    }
+  }
+
+  if (!counterparty) {
+    const merchant = String(tx.merchant_name || "").trim();
+    if (merchant && normalizeText(merchant) !== "zelle") {
+      counterparty = merchant;
+    }
+  }
+
+  const type =
+    normalizedDescription.includes("transfer") ||
+    normalizedDescription.includes("payment")
+      ? "Transfer"
+      : "Transaction";
+
+  return {
+    direction,
+    type,
+    counterparty,
+    title: counterparty
+      ? `${direction} ${type}: ${counterparty}`
+      : `${direction} ${type}`,
+  };
+}
 
 export default function PortfolioPage() {
   const [selectedGame, setSelectedGame] = useState("All");
@@ -35,6 +80,7 @@ export default function PortfolioPage() {
   const [spendError, setSpendError] = useState("");
   const [spendTransactions, setSpendTransactions] = useState([]);
   const [venmoTransactions, setVenmoTransactions] = useState([]);
+  const [zelleTransactions, setZelleTransactions] = useState([]);
   const [recentView, setRecentView] = useState({ source: "chase", page: 1 });
   const [cardGridPage, setCardGridPage] = useState(1);
 
@@ -76,9 +122,13 @@ export default function PortfolioPage() {
     [],
   );
 
-  const cardStoreTransactions = useMemo(
+  const chaseCardStoreTransactions = useMemo(
     () =>
       spendTransactions.filter((tx) => {
+        if ((tx.source || "").toLowerCase() !== "chase") {
+          return false;
+        }
+
         const txName = normalizeText(tx.merchant_name || tx.description || "");
         if (!txName) return false;
 
@@ -94,17 +144,12 @@ export default function PortfolioPage() {
 
   const loadSpendData = useCallback(async () => {
     try {
-      const endDate = new Date();
-      const startDate = new Date();
-      startDate.setMonth(startDate.getMonth() - 2);
-
-      const formatDate = (value) => value.toISOString().slice(0, 10);
       const dateParams = new URLSearchParams({
-        start_date: formatDate(startDate),
-        end_date: formatDate(endDate),
+        start_date: "2026-01-01",
+        end_date: "2026-12-31",
       });
 
-      const [summaryRes, txRes, venmoRes] = await Promise.all([
+      const [summaryRes, txRes, venmoRes, zelleRes] = await Promise.all([
         fetch(
           `${BACKEND_BASE_URL}/api/spend/summary?${dateParams.toString()}`,
           {
@@ -123,6 +168,12 @@ export default function PortfolioPage() {
             cache: "no-cache",
           },
         ),
+        fetch(
+          `${BACKEND_BASE_URL}/api/spend/transactions?${dateParams.toString()}&source=zelle&limit=${SPEND_FETCH_LIMIT}`,
+          {
+            cache: "no-cache",
+          },
+        ),
       ]);
 
       if (!summaryRes.ok) {
@@ -134,6 +185,9 @@ export default function PortfolioPage() {
       if (!venmoRes.ok) {
         throw new Error(`Venmo transactions failed (${venmoRes.status})`);
       }
+      if (!zelleRes.ok) {
+        throw new Error(`Zelle transactions failed (${zelleRes.status})`);
+      }
 
       const txPayload = await txRes.json();
       const transactions = Array.isArray(txPayload.transactions)
@@ -143,15 +197,23 @@ export default function PortfolioPage() {
       const venmoTransactionsRaw = Array.isArray(venmoPayload.transactions)
         ? venmoPayload.transactions
         : [];
+      const zellePayload = await zelleRes.json();
+      const zelleTransactionsRaw = Array.isArray(zellePayload.transactions)
+        ? zellePayload.transactions
+        : [];
       const dedupedTransactions = dedupeByAccountTimestamp(
         dedupeTransactions(transactions),
       );
       const dedupedVenmoTransactions = dedupeByAccountTimestamp(
         dedupeTransactions(venmoTransactionsRaw),
       );
+      const dedupedZelleTransactions = dedupeByAccountTimestamp(
+        dedupeTransactions(zelleTransactionsRaw),
+      );
 
       setSpendTransactions(dedupedTransactions);
       setVenmoTransactions(dedupedVenmoTransactions);
+      setZelleTransactions(dedupedZelleTransactions);
       setSpendStatus("ready");
     } catch (error) {
       setSpendStatus("error");
@@ -196,13 +258,13 @@ export default function PortfolioPage() {
     setCardGridPage(1);
   }, []);
 
-  const cardStoreTotalSpend = useMemo(
+  const chaseCardStoreSpend = useMemo(
     () =>
-      cardStoreTransactions.reduce(
+      chaseCardStoreTransactions.reduce(
         (sum, tx) => sum + Number(tx.amount || 0),
         0,
       ),
-    [cardStoreTransactions],
+    [chaseCardStoreTransactions],
   );
 
   const venmoBreakdown = useMemo(() => {
@@ -271,6 +333,38 @@ export default function PortfolioPage() {
     [venmoBreakdown],
   );
 
+  const cardStoreTotalSpend = useMemo(
+    () => chaseCardStoreSpend,
+    [chaseCardStoreSpend],
+  );
+
+  const zelleBreakdown = useMemo(() => {
+    let sent = 0;
+    let received = 0;
+
+    for (const tx of zelleTransactions) {
+      const amount = Number(tx.amount || 0);
+      if (!Number.isFinite(amount) || amount === 0) {
+        continue;
+      }
+
+      if (amount > 0) {
+        sent += amount;
+      } else {
+        received += Math.abs(amount);
+      }
+    }
+
+    const totalReceived = received + MANUAL_ZELLE_RECEIVED;
+
+    return {
+      sent,
+      received: totalReceived,
+      manualReceived: MANUAL_ZELLE_RECEIVED,
+      net: sent - totalReceived,
+    };
+  }, [zelleTransactions]);
+
   const sortTransactionsNewestFirst = useCallback((transactions) => {
     return [...transactions].sort((a, b) => {
       const dateDiff = toTime(b.date) - toTime(a.date);
@@ -281,11 +375,11 @@ export default function PortfolioPage() {
 
   const chaseRecentTransactions = useMemo(
     () =>
-      sortTransactionsNewestFirst(cardStoreTransactions).slice(
+      sortTransactionsNewestFirst(chaseCardStoreTransactions).slice(
         0,
         MAX_RECENT_RECORDS,
       ),
-    [cardStoreTransactions, sortTransactionsNewestFirst],
+    [chaseCardStoreTransactions, sortTransactionsNewestFirst],
   );
 
   const venmoRecentTransactions = useMemo(
@@ -301,10 +395,23 @@ export default function PortfolioPage() {
     [venmoTransactions, sortTransactionsNewestFirst],
   );
 
+  const zelleRecentTransactions = useMemo(
+    () =>
+      sortTransactionsNewestFirst(zelleTransactions)
+        .slice(0, MAX_RECENT_RECORDS)
+        .map((tx) => ({
+          ...tx,
+          zelleParsed: parseZelleTransaction(tx),
+        })),
+    [zelleTransactions, sortTransactionsNewestFirst],
+  );
+
   const recentTransactions =
     recentView.source === "venmo"
       ? venmoRecentTransactions
-      : chaseRecentTransactions;
+      : recentView.source === "zelle"
+        ? zelleRecentTransactions
+        : chaseRecentTransactions;
 
   const totalRecentPages = Math.max(
     1,
@@ -334,7 +441,8 @@ export default function PortfolioPage() {
       totalValue -
       cardStoreTotalSpend -
       venmoBreakdown.loss +
-      venmoBreakdown.profit;
+      venmoBreakdown.profit +
+      MANUAL_ZELLE_RECEIVED;
 
     return {
       cardCount: filteredCards.length,
@@ -352,7 +460,7 @@ export default function PortfolioPage() {
         <p>
           A TCG portfolio and spend analysis tool to keep myself responsible.
           Card data and values are sourced from public Collectr data on the web,
-          and financial data connects to Venmo/Chase spend via Plaid.
+          and financial data connects to Venmo/Chase/Zelle spend via Plaid.
         </p>
       </header>
 
@@ -397,20 +505,36 @@ export default function PortfolioPage() {
               <>
                 <div className="spend-overview">
                   <article>
-                    <h3>Card Store Spend (2 Months)</h3>
+                    <h3>Card Store Spend (2026)</h3>
                     <p>{money(cardStoreTotalSpend)}</p>
                   </article>
                   <article>
-                    <h3>Venmo Loss (Keyword/Card-Related)</h3>
+                    <h3>Venmo Loss (Keyword/Card-Related, 2026)</h3>
                     <p>{money(venmoBreakdown.loss)}</p>
                   </article>
                   <article>
-                    <h3>Venmo Profit (Matched Standard Transfer)</h3>
+                    <h3>Venmo Profit (Matched Standard Transfer, 2026)</h3>
                     <p>{money(venmoBreakdown.profit)}</p>
                   </article>
                   <article>
-                    <h3>Venmo Net Impact (2 Months)</h3>
+                    <h3>Venmo Net Impact (2026)</h3>
                     <p>{money(venmoNet)}</p>
+                  </article>
+                  <article>
+                    <h3>Zelle Sent (2026)</h3>
+                    <p>{money(zelleBreakdown.sent)}</p>
+                  </article>
+                  <article>
+                    <h3>Zelle Manual Received (Hardcoded)</h3>
+                    <p>{money(zelleBreakdown.manualReceived)}</p>
+                  </article>
+                  <article>
+                    <h3>Zelle Received (2026)</h3>
+                    <p>{money(zelleBreakdown.received)}</p>
+                  </article>
+                  <article>
+                    <h3>Zelle Net Impact (2026)</h3>
+                    <p>{money(zelleBreakdown.net)}</p>
                   </article>
                 </div>
 
@@ -421,6 +545,7 @@ export default function PortfolioPage() {
                       options={[
                         { label: "Chase", value: "chase" },
                         { label: "Venmo", value: "venmo" },
+                        { label: "Zelle", value: "zelle" },
                       ]}
                       value={recentView.source}
                       onChange={(value) =>
@@ -431,7 +556,12 @@ export default function PortfolioPage() {
 
                   {recentTransactions.length === 0 ? (
                     <p>
-                      No {recentView.source === "venmo" ? "Venmo" : "Chase"}{" "}
+                      No qualifying{" "}
+                      {recentView.source === "venmo"
+                        ? "Venmo"
+                        : recentView.source === "zelle"
+                          ? "Zelle"
+                          : "Chase"}{" "}
                       transactions synced yet.
                     </p>
                   ) : (
@@ -446,13 +576,21 @@ export default function PortfolioPage() {
                           >
                             <div>
                               <p className="tx-merchant">
-                                {tx.merchant_name ||
-                                  tx.description ||
-                                  "Transaction"}
+                                {recentView.source === "zelle"
+                                  ? tx.zelleParsed?.title ||
+                                    tx.merchant_name ||
+                                    tx.description ||
+                                    "Transaction"
+                                  : tx.merchant_name ||
+                                    tx.description ||
+                                    "Transaction"}
                               </p>
                               <p className="tx-meta">
-                                {(tx.source || "other").toUpperCase()} •{" "}
-                                {tx.date}
+                                {(tx.source || "other").toUpperCase()}
+                                {recentView.source === "zelle"
+                                  ? ` • ${tx.zelleParsed?.direction || "Unknown"}`
+                                  : ""}{" "}
+                                • {tx.date}
                               </p>
                             </div>
                             <p className="tx-amount">{money(tx.amount)}</p>

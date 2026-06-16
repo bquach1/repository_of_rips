@@ -6,6 +6,8 @@ from pydantic import BaseModel, Field
 class LinkTokenRequest(BaseModel):
     user_id: str = Field(default="local-user")
     source_hint: str | None = None
+    reconnect_item_id: str | None = None
+    force_new: bool = False
 
 
 class ExchangePublicTokenRequest(BaseModel):
@@ -13,6 +15,17 @@ class ExchangePublicTokenRequest(BaseModel):
     institution_name: str | None = None
     user_id: str = Field(default="local-user")
     source_hint: str | None = None
+
+
+class CleanupPlaidItemsRequest(BaseModel):
+    user_id: str = Field(default="local-user")
+    dry_run: bool = False
+    remove_from_plaid: bool = False
+
+
+class ReclassifySourcesRequest(BaseModel):
+    user_id: str = Field(default="local-user")
+    dry_run: bool = False
 
 
 class SyncRequest(BaseModel):

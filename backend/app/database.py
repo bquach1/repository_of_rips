@@ -4,6 +4,7 @@ import json
 import sqlite3
 from contextlib import contextmanager
 from datetime import date, datetime, timezone
+from typing import Iterator
 
 from .settings import settings
 
@@ -19,7 +20,7 @@ def _json_default(value: object) -> str:
 
 
 @contextmanager
-def get_conn() -> sqlite3.Connection:
+def get_conn() -> Iterator[sqlite3.Connection]:
     settings.database_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(settings.database_path)
     conn.row_factory = sqlite3.Row
@@ -121,6 +122,23 @@ def list_items() -> list[dict]:
             "SELECT item_id, institution_name, source_hint, user_id, created_at FROM plaid_items ORDER BY created_at DESC"
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+def delete_item_and_transactions(item_id: str) -> dict:
+    with get_conn() as conn:
+        tx_cursor = conn.execute(
+            "DELETE FROM transactions WHERE item_id = ?",
+            (item_id,),
+        )
+        item_cursor = conn.execute(
+            "DELETE FROM plaid_items WHERE item_id = ?",
+            (item_id,),
+        )
+
+    return {
+        "item_deleted": item_cursor.rowcount > 0,
+        "transactions_deleted": tx_cursor.rowcount,
+    }
 
 
 def set_account_source(account_id: str, source: str) -> None:
@@ -387,3 +405,36 @@ def query_transaction_date_bounds(
         "max_date": row["max_date"],
         "total_rows": int(row["total_rows"] or 0),
     }
+
+
+def list_transactions_for_item(item_id: str) -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                plaid_transaction_id,
+                item_id,
+                account_id,
+                account_name,
+                merchant_name,
+                description,
+                source
+            FROM transactions
+            WHERE item_id = ?
+            """,
+            (item_id,),
+        ).fetchall()
+
+    return [dict(r) for r in rows]
+
+
+def update_transaction_source(plaid_transaction_id: str, source: str) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            """
+            UPDATE transactions
+            SET source = ?, updated_at = ?
+            WHERE plaid_transaction_id = ?
+            """,
+            (source, utc_now_iso(), plaid_transaction_id),
+        )

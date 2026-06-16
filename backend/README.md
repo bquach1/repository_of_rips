@@ -6,6 +6,7 @@ FastAPI backend for connecting Plaid accounts and calculating spend totals, with
 
 - `POST /api/plaid/link-token`: Create a Plaid Link token for frontend Plaid Link flow.
 - `POST /api/plaid/exchange-public-token`: Exchange Plaid `public_token` for `access_token` and store item.
+- `POST /api/plaid/cleanup-duplicates`: Remove duplicate linked items (local-only or local + Plaid item remove).
 - `POST /api/plaid/sync/{item_id}`: Pull transactions via `transactions/sync` and save locally.
 - `POST /api/accounts/source-map`: Manually map account IDs to `venmo|chase|other`.
 - `GET /api/spend/summary`: Return total spend and spend by source.
