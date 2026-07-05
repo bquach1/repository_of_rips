@@ -14,8 +14,76 @@ function PlaidConnectPanel({ onLinked }) {
   const [lastMode, setLastMode] = useState("new");
   const [isCleaningItems, setIsCleaningItems] = useState(false);
   const [cleanupMessage, setCleanupMessage] = useState("");
+  const [showLaunchPrompt, setShowLaunchPrompt] = useState(false);
+  const [launchPromptText, setLaunchPromptText] = useState("");
+  const [preparedToken, setPreparedToken] = useState("");
+  const [syncCooldownUntil, setSyncCooldownUntil] = useState({});
+  const [linkRateLimitUntil, setLinkRateLimitUntil] = useState(0);
+  const [clockMs, setClockMs] = useState(0);
   const sourceHintRef = useRef("other");
-  const pendingOpenRef = useRef(false);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setClockMs(Date.now());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const getSyncCooldownSeconds = useCallback(
+    (itemId) => {
+      const until = syncCooldownUntil[itemId];
+      if (!until) {
+        return 0;
+      }
+      const remaining = Math.ceil((until - clockMs) / 1000);
+      return remaining > 0 ? remaining : 0;
+    },
+    [clockMs, syncCooldownUntil],
+  );
+
+  const linkRateLimitSeconds = useMemo(() => {
+    if (!linkRateLimitUntil) {
+      return 0;
+    }
+    const remaining = Math.ceil((linkRateLimitUntil - clockMs) / 1000);
+    return remaining > 0 ? remaining : 0;
+  }, [clockMs, linkRateLimitUntil]);
+
+  const setLinkRateLimitCooldown = useCallback((seconds) => {
+    if (!seconds || seconds <= 0) {
+      return;
+    }
+    setLinkRateLimitUntil(Date.now() + seconds * 1000);
+  }, []);
+
+  const setSyncCooldownForItem = useCallback((itemId, seconds) => {
+    if (!itemId || !seconds || seconds <= 0) {
+      return;
+    }
+    setSyncCooldownUntil((prev) => ({
+      ...prev,
+      [itemId]: Date.now() + seconds * 1000,
+    }));
+  }, []);
+
+  const filteredLinkedItems = useMemo(() => {
+    return linkedItems.filter((item) => {
+      const institution = String(item.institution_name || "")
+        .trim()
+        .toLowerCase();
+      const hint = String(item.source_hint || "")
+        .trim()
+        .toLowerCase();
+
+      const isChase = institution === "chase" && hint === "chase";
+      const isVenmoPersonal =
+        (institution === "venmo - personal" ||
+          institution === "venmo personal") &&
+        hint === "venmo";
+
+      return isChase || isVenmoPersonal;
+    });
+  }, [linkedItems]);
 
   const fetchLinkedItems = useCallback(async () => {
     setIsLoadingItems(true);
@@ -35,91 +103,93 @@ function PlaidConnectPanel({ onLinked }) {
     }
   }, []);
 
-  const createLinkToken = useCallback(async (options = {}) => {
-    try {
-      setStatus("creating-link-token");
-      setError("");
-
-      const requestPayload = {
-        user_id: "local-user",
-      };
-      if (options.sourceHint) {
-        requestPayload.source_hint = options.sourceHint;
-      }
-      if (options.reconnectItemId) {
-        requestPayload.reconnect_item_id = options.reconnectItemId;
-      }
-      if (options.forceNew) {
-        requestPayload.force_new = true;
+  const createLinkToken = useCallback(
+    async (options = {}) => {
+      if (linkRateLimitSeconds > 0) {
+        setStatus("error");
+        setError(
+          `Plaid is rate-limited. Try again in ${linkRateLimitSeconds}s.`,
+        );
+        return null;
       }
 
-      const response = await fetch(`${BACKEND_BASE_URL}/api/plaid/link-token`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(requestPayload),
-      });
-
-      if (!response.ok) {
-        throw new Error(`Link token request failed (${response.status})`);
-      }
-
-      const payload = await response.json();
-      if (!payload.link_token) {
-        throw new Error("No link_token returned from backend.");
-      }
-
-      setLinkToken(payload.link_token);
-      setLastMode(payload.mode || "new");
-      setStatus("link-token-ready");
-      return payload;
-    } catch (err) {
-      setStatus("error");
-      setError(err.message || "Failed to create link token.");
-      return null;
-    }
-  }, []);
-
-  useEffect(() => {
-    let active = true;
-
-    async function bootstrapLinkToken() {
       try {
+        setStatus("creating-link-token");
+        setError("");
+
+        const requestPayload = {
+          user_id: "local-user",
+        };
+        if (options.sourceHint) {
+          requestPayload.source_hint = options.sourceHint;
+        }
+        if (options.reconnectItemId) {
+          requestPayload.reconnect_item_id = options.reconnectItemId;
+        }
+        if (options.forceNew) {
+          requestPayload.force_new = true;
+        }
+
         const response = await fetch(
           `${BACKEND_BASE_URL}/api/plaid/link-token`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ user_id: "local-user" }),
+            body: JSON.stringify(requestPayload),
           },
         );
 
         if (!response.ok) {
-          throw new Error(`Link token request failed (${response.status})`);
+          let payload = null;
+          try {
+            payload = await response.json();
+          } catch {
+            payload = null;
+          }
+
+          const detail = payload?.detail;
+          if (detail?.error_code === "LINK_TOKEN_COOLDOWN_ACTIVE") {
+            const retryAfter = Number(detail.retry_after_seconds || 30);
+            setLinkRateLimitCooldown(retryAfter);
+            throw new Error(
+              detail.error_message ||
+                `Please wait ${retryAfter}s before requesting another link token.`,
+            );
+          }
+
+          if (detail?.error_code === "RATE_LIMIT") {
+            const retryAfter = Number(detail.retry_after_seconds || 60);
+            setLinkRateLimitCooldown(retryAfter);
+            throw new Error(
+              detail.error_message ||
+                `Plaid rate limit exceeded. Try again in ${retryAfter}s.`,
+            );
+          }
+
+          throw new Error(
+            detail?.error_message ||
+              `Link token request failed (${response.status})`,
+          );
         }
 
         const payload = await response.json();
-        if (!active || !payload.link_token) {
-          return;
+        if (!payload.link_token) {
+          throw new Error("No link_token returned from backend.");
         }
 
         setLinkToken(payload.link_token);
+        setPreparedToken(payload.link_token);
         setLastMode(payload.mode || "new");
         setStatus("link-token-ready");
+        return payload;
       } catch (err) {
-        if (!active) {
-          return;
-        }
         setStatus("error");
         setError(err.message || "Failed to create link token.");
+        return null;
       }
-    }
-
-    bootstrapLinkToken();
-
-    return () => {
-      active = false;
-    };
-  }, []);
+    },
+    [linkRateLimitSeconds, setLinkRateLimitCooldown],
+  );
 
   useEffect(() => {
     let active = true;
@@ -214,23 +284,19 @@ function PlaidConnectPanel({ onLinked }) {
     onSuccess,
     onExit: (err) => {
       if (err) {
+        const code = err.error_code ? ` [${err.error_code}]` : "";
+        if (err.error_code === "RATE_LIMIT") {
+          setLinkRateLimitCooldown(60);
+        }
         setStatus("error");
         setError(
-          err.display_message ||
+          (err.display_message ||
             err.error_message ||
-            "Plaid Link exited with an error.",
+            "Plaid Link exited with an error.") + code,
         );
       }
     },
   });
-
-  useEffect(() => {
-    if (!pendingOpenRef.current || !ready || !linkToken) {
-      return;
-    }
-    pendingOpenRef.current = false;
-    open();
-  }, [ready, linkToken, open]);
 
   const statusText = useMemo(() => {
     switch (status) {
@@ -254,34 +320,79 @@ function PlaidConnectPanel({ onLinked }) {
   const openWithSource = async (nextSource, options = {}) => {
     sourceHintRef.current = nextSource;
     setSourceHint(nextSource);
+    setShowLaunchPrompt(false);
+    setLaunchPromptText("");
     const created = await createLinkToken({
       sourceHint: nextSource,
       reconnectItemId: options.reconnectItemId,
       forceNew: Boolean(options.forceNew),
     });
     if (created?.link_token) {
-      pendingOpenRef.current = true;
-      if (ready) {
-        pendingOpenRef.current = false;
-        open();
-      }
+      const promptText =
+        created.mode === "update"
+          ? "Reconnect token ready. Click Launch Plaid Modal to complete login/MFA."
+          : "Link token ready. Click Launch Plaid Modal to continue.";
+      setLaunchPromptText(promptText);
+      setShowLaunchPrompt(true);
     }
   };
 
-  const syncExistingItem = async (itemId) => {
+  const syncExistingItem = async (item) => {
+    const existingCooldown = getSyncCooldownSeconds(item.item_id);
+    if (existingCooldown > 0) {
+      setError(
+        `Please wait ${existingCooldown}s before syncing this connection again.`,
+      );
+      return;
+    }
+
     try {
       setStatus("syncing-transactions");
       setError("");
       const response = await fetch(
-        `${BACKEND_BASE_URL}/api/plaid/sync/${itemId}`,
+        `${BACKEND_BASE_URL}/api/plaid/sync/${item.item_id}`,
         {
           method: "POST",
         },
       );
       if (!response.ok) {
-        throw new Error(`Sync failed (${response.status})`);
+        let payload = null;
+        try {
+          payload = await response.json();
+        } catch {
+          payload = null;
+        }
+
+        const detail = payload?.detail;
+        if (detail?.error_code === "SYNC_COOLDOWN_ACTIVE") {
+          const retryAfter = Number(detail.retry_after_seconds || 30);
+          setSyncCooldownForItem(item.item_id, retryAfter);
+          setStatus("link-token-ready");
+          setError(
+            `Sync cooldown active. Try again in ${retryAfter}s for this item.`,
+          );
+          return;
+        }
+
+        if (detail?.error_code === "ITEM_LOGIN_REQUIRED") {
+          setStatus("link-token-ready");
+          setError(
+            "This connection needs re-authentication. Generate reconnect token, then launch Plaid modal.",
+          );
+          await openWithSource(item.source_hint || "other", {
+            reconnectItemId: item.item_id,
+          });
+          return;
+        }
+
+        const message =
+          detail?.error_message ||
+          detail?.message ||
+          `Sync failed (${response.status})`;
+        throw new Error(message);
       }
       setStatus("connected");
+      setSyncCooldownForItem(item.item_id, 15);
       await onLinked();
     } catch (err) {
       setStatus("error");
@@ -372,7 +483,6 @@ function PlaidConnectPanel({ onLinked }) {
           type="button"
           className="chip chip-active"
           onClick={() => openWithSource("venmo")}
-          disabled={!ready || !linkToken}
         >
           Connect Venmo
         </button>
@@ -380,7 +490,6 @@ function PlaidConnectPanel({ onLinked }) {
           type="button"
           className="chip chip-active"
           onClick={() => openWithSource("chase")}
-          disabled={!ready || !linkToken}
         >
           Connect Chase
         </button>
@@ -388,7 +497,6 @@ function PlaidConnectPanel({ onLinked }) {
           type="button"
           className="chip chip-active"
           onClick={() => openWithSource("zelle")}
-          disabled={!ready || !linkToken}
         >
           Connect Zelle (via Bank)
         </button>
@@ -396,14 +504,15 @@ function PlaidConnectPanel({ onLinked }) {
           type="button"
           className="chip"
           onClick={() => openWithSource("other")}
-          disabled={!ready || !linkToken}
         >
           Connect Other Institution
         </button>
         <button
           type="button"
           className="chip"
-          onClick={() => createLinkToken({ forceNew: true })}
+          onClick={() =>
+            openWithSource(sourceHintRef.current, { forceNew: true })
+          }
         >
           Refresh Link Token
         </button>
@@ -412,6 +521,36 @@ function PlaidConnectPanel({ onLinked }) {
       <p className="plaid-status">Status: {statusText}</p>
       <p className="plaid-status">Source tag for next link: {sourceHint}</p>
       <p className="plaid-status">Link mode: {lastMode}</p>
+      {linkRateLimitSeconds > 0 ? (
+        <p className="plaid-status">
+          Plaid rate limit active. You can request a new token in{" "}
+          {linkRateLimitSeconds}s.
+        </p>
+      ) : null}
+      {showLaunchPrompt ? (
+        <div className="plaid-actions">
+          {launchPromptText ? (
+            <p className="plaid-status">{launchPromptText}</p>
+          ) : null}
+          <button
+            type="button"
+            className="chip chip-active"
+            onClick={() => {
+              if (!ready || !linkToken || linkToken !== preparedToken) {
+                setError(
+                  "Plaid is still initializing the token. Wait a second and click Launch again.",
+                );
+                return;
+              }
+              setError("");
+              setShowLaunchPrompt(false);
+              open();
+            }}
+          >
+            Launch Plaid Modal
+          </button>
+        </div>
+      ) : null}
 
       <div className="plaid-actions">
         <button type="button" className="chip" onClick={fetchLinkedItems}>
@@ -421,7 +560,7 @@ function PlaidConnectPanel({ onLinked }) {
           type="button"
           className="chip"
           onClick={() => cleanupDuplicateItems({ removeFromPlaid: false })}
-          disabled={isCleaningItems}
+          disabled={isCleaningItems || linkRateLimitSeconds > 0}
         >
           Cleanup Duplicates (Local)
         </button>
@@ -429,7 +568,7 @@ function PlaidConnectPanel({ onLinked }) {
           type="button"
           className="chip"
           onClick={() => cleanupDuplicateItems({ removeFromPlaid: true })}
-          disabled={isCleaningItems}
+          disabled={isCleaningItems || linkRateLimitSeconds > 0}
         >
           Cleanup Duplicates (Local + Plaid)
         </button>
@@ -437,7 +576,7 @@ function PlaidConnectPanel({ onLinked }) {
           type="button"
           className="chip"
           onClick={reclassifySources}
-          disabled={isCleaningItems}
+          disabled={isCleaningItems || linkRateLimitSeconds > 0}
         >
           Reclassify Sources
         </button>
@@ -452,7 +591,7 @@ function PlaidConnectPanel({ onLinked }) {
       {!isLoadingItems && linkedItems.length > 0 ? (
         <div>
           <h3>Existing Connections</h3>
-          {linkedItems.map((item) => (
+          {filteredLinkedItems.map((item) => (
             <div key={item.item_id} className="plaid-actions">
               <span className="plaid-status">
                 {item.institution_name || "Unknown institution"} (
@@ -466,19 +605,28 @@ function PlaidConnectPanel({ onLinked }) {
                     reconnectItemId: item.item_id,
                   })
                 }
-                disabled={!ready || !linkToken}
+                disabled={linkRateLimitSeconds > 0}
               >
                 Reconnect Existing
               </button>
               <button
                 type="button"
                 className="chip"
-                onClick={() => syncExistingItem(item.item_id)}
+                onClick={() => syncExistingItem(item)}
+                disabled={getSyncCooldownSeconds(item.item_id) > 0}
               >
-                Sync Existing
+                {getSyncCooldownSeconds(item.item_id) > 0
+                  ? `Sync Existing (${getSyncCooldownSeconds(item.item_id)}s)`
+                  : "Sync Existing"}
               </button>
             </div>
           ))}
+          {filteredLinkedItems.length === 0 ? (
+            <p className="plaid-status">
+              No eligible connections found. Keep only Chase (chase) and Venmo -
+              Personal (venmo).
+            </p>
+          ) : null}
         </div>
       ) : null}
       {cleanupMessage ? <p className="plaid-status">{cleanupMessage}</p> : null}

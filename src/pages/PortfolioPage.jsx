@@ -125,10 +125,6 @@ export default function PortfolioPage() {
   const chaseCardStoreTransactions = useMemo(
     () =>
       spendTransactions.filter((tx) => {
-        if ((tx.source || "").toLowerCase() !== "chase") {
-          return false;
-        }
-
         const txName = normalizeText(tx.merchant_name || tx.description || "");
         if (!txName) return false;
 
@@ -149,36 +145,27 @@ export default function PortfolioPage() {
         end_date: "2026-12-31",
       });
 
-      const [summaryRes, txRes, venmoRes, zelleRes] = await Promise.all([
+      const [txRes, venmoRes, zelleRes] = await Promise.all([
         fetch(
-          `${BACKEND_BASE_URL}/api/spend/summary?${dateParams.toString()}`,
+          `${BACKEND_BASE_URL}/api/spend/transactions?${dateParams.toString()}&include_pending=true&limit=${SPEND_FETCH_LIMIT}&auto_sync=true`,
           {
             cache: "no-cache",
           },
         ),
         fetch(
-          `${BACKEND_BASE_URL}/api/spend/transactions?${dateParams.toString()}&limit=${SPEND_FETCH_LIMIT}`,
+          `${BACKEND_BASE_URL}/api/spend/transactions?${dateParams.toString()}&include_pending=true&source=venmo&limit=${SPEND_FETCH_LIMIT}&auto_sync=false`,
           {
             cache: "no-cache",
           },
         ),
         fetch(
-          `${BACKEND_BASE_URL}/api/spend/transactions?${dateParams.toString()}&source=venmo&limit=${SPEND_FETCH_LIMIT}`,
-          {
-            cache: "no-cache",
-          },
-        ),
-        fetch(
-          `${BACKEND_BASE_URL}/api/spend/transactions?${dateParams.toString()}&source=zelle&limit=${SPEND_FETCH_LIMIT}`,
+          `${BACKEND_BASE_URL}/api/spend/transactions?${dateParams.toString()}&include_pending=true&source=zelle&limit=${SPEND_FETCH_LIMIT}&auto_sync=false`,
           {
             cache: "no-cache",
           },
         ),
       ]);
 
-      if (!summaryRes.ok) {
-        throw new Error(`Spend summary failed (${summaryRes.status})`);
-      }
       if (!txRes.ok) {
         throw new Error(`Spend transactions failed (${txRes.status})`);
       }

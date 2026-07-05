@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -41,6 +42,11 @@ from .venmo_classifier import classify_venmo_transaction
 
 logger = logging.getLogger(__name__)
 
+SYNC_COOLDOWN_SECONDS = 45
+_LAST_SYNC_BY_ITEM: dict[str, float] = {}
+LINK_TOKEN_COOLDOWN_SECONDS = 30
+_LAST_LINK_TOKEN_REQUEST_AT: dict[str, float] = {}
+
 app = FastAPI(title="Plaid Spend Backend", version="0.1.0")
 
 app.add_middleware(
@@ -50,6 +56,70 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _extract_plaid_error(exc: Exception) -> dict | None:
+    body = getattr(exc, "body", None)
+    if isinstance(body, bytes):
+        body = body.decode("utf-8", errors="ignore")
+
+    if isinstance(body, str) and body.strip():
+        try:
+            parsed = json.loads(body)
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+
+    text = str(exc)
+    if "ITEM_LOGIN_REQUIRED" in text:
+        return {
+            "error_code": "ITEM_LOGIN_REQUIRED",
+            "error_message": (
+                "Item requires re-authentication in Plaid Link update mode."
+            ),
+        }
+    return None
+
+
+def _sync_cooldown_remaining(item_id: str) -> int:
+    last_sync = _LAST_SYNC_BY_ITEM.get(item_id)
+    if last_sync is None:
+        return 0
+
+    elapsed = time.time() - last_sync
+    remaining = SYNC_COOLDOWN_SECONDS - elapsed
+    if remaining <= 0:
+        return 0
+    return int(remaining) if remaining.is_integer() else int(remaining) + 1
+
+
+def _mark_item_synced_now(item_id: str) -> None:
+    _LAST_SYNC_BY_ITEM[item_id] = time.time()
+
+
+def _link_token_key(user_id: str, reconnect_item_id: str | None) -> str:
+    suffix = reconnect_item_id or "new"
+    return f"{user_id}:{suffix}"
+
+
+def _link_token_cooldown_remaining(user_id: str, reconnect_item_id: str | None) -> int:
+    key = _link_token_key(user_id, reconnect_item_id)
+    last_request = _LAST_LINK_TOKEN_REQUEST_AT.get(key)
+    if last_request is None:
+        return 0
+
+    elapsed = time.time() - last_request
+    remaining = LINK_TOKEN_COOLDOWN_SECONDS - elapsed
+    if remaining <= 0:
+        return 0
+    return int(remaining) if remaining.is_integer() else int(remaining) + 1
+
+
+def _mark_link_token_requested(user_id: str, reconnect_item_id: str | None) -> None:
+    _LAST_LINK_TOKEN_REQUEST_AT[_link_token_key(user_id, reconnect_item_id)] = (
+        time.time()
+    )
 
 
 def _sync_item_internal(item_id: str) -> dict:
@@ -92,9 +162,7 @@ def _sync_item_internal(item_id: str) -> dict:
                     "plaid_transaction_id": tx["transaction_id"],
                     "item_id": item_id,
                     "account_id": account_id,
-                    "account_name": tx.get("account_owner")
-                    or tx.get("authorized_datetime")
-                    or "",
+                    "account_name": tx.get("account_owner") or "",
                     "merchant_name": tx.get("merchant_name") or "",
                     "description": tx.get("name") or "",
                     "amount": float(tx.get("amount") or 0),
@@ -126,9 +194,7 @@ def _sync_item_internal(item_id: str) -> dict:
                     "plaid_transaction_id": tx["transaction_id"],
                     "item_id": item_id,
                     "account_id": account_id,
-                    "account_name": tx.get("account_owner")
-                    or tx.get("authorized_datetime")
-                    or "",
+                    "account_name": tx.get("account_owner") or "",
                     "merchant_name": tx.get("merchant_name") or "",
                     "description": tx.get("name") or "",
                     "amount": float(tx.get("amount") or 0),
@@ -256,7 +322,47 @@ def _maybe_auto_sync(
 
     results = []
     for item in items:
-        results.append(_sync_item_internal(item["item_id"]))
+        cooldown_remaining = _sync_cooldown_remaining(item["item_id"])
+        if cooldown_remaining > 0:
+            results.append(
+                {
+                    "item_id": item["item_id"],
+                    "skipped": True,
+                    "reason": "sync_cooldown_active",
+                    "retry_after_seconds": cooldown_remaining,
+                }
+            )
+            continue
+
+        _mark_item_synced_now(item["item_id"])
+        try:
+            results.append(_sync_item_internal(item["item_id"]))
+        except HTTPException as exc:
+            detail = (
+                exc.detail
+                if isinstance(exc.detail, dict)
+                else {"message": str(exc.detail)}
+            )
+            results.append(
+                {
+                    "item_id": item["item_id"],
+                    "error": detail,
+                }
+            )
+        except Exception as exc:  # pragma: no cover
+            plaid_error = _extract_plaid_error(exc)
+            if plaid_error and plaid_error.get("error_code") == "ITEM_LOGIN_REQUIRED":
+                plaid_error = {
+                    **plaid_error,
+                    "needs_reauth": True,
+                    "reconnect_item_id": item["item_id"],
+                }
+            results.append(
+                {
+                    "item_id": item["item_id"],
+                    "error": plaid_error or {"message": str(exc)},
+                }
+            )
 
     return {
         "auto_sync_attempted": True,
@@ -305,6 +411,20 @@ def health() -> dict:
 @app.post("/api/plaid/link-token")
 def api_create_link_token(payload: LinkTokenRequest) -> dict:
     try:
+        cooldown_remaining = _link_token_cooldown_remaining(
+            payload.user_id,
+            payload.reconnect_item_id,
+        )
+        if cooldown_remaining > 0:
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "error_code": "LINK_TOKEN_COOLDOWN_ACTIVE",
+                    "error_message": "Link token requested too frequently.",
+                    "retry_after_seconds": cooldown_remaining,
+                },
+            )
+
         reconnect_item = None
 
         if payload.reconnect_item_id:
@@ -331,6 +451,10 @@ def api_create_link_token(payload: LinkTokenRequest) -> dict:
             user_id=payload.user_id,
             access_token=(reconnect_item or {}).get("access_token"),
         )
+        _mark_link_token_requested(
+            payload.user_id,
+            reconnect_item["item_id"] if reconnect_item else None,
+        )
 
         if reconnect_item:
             response["reconnect_item_id"] = reconnect_item["item_id"]
@@ -341,6 +465,19 @@ def api_create_link_token(payload: LinkTokenRequest) -> dict:
     except Exception as exc:  # pragma: no cover
         if isinstance(exc, HTTPException):
             raise
+        plaid_error = _extract_plaid_error(exc)
+        if plaid_error and plaid_error.get("error_code") == "RATE_LIMIT":
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "error_code": "RATE_LIMIT",
+                    "error_message": plaid_error.get(
+                        "error_message",
+                        "Plaid rate limit exceeded. Please retry shortly.",
+                    ),
+                    "retry_after_seconds": 60,
+                },
+            ) from exc
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
@@ -374,7 +511,13 @@ def api_cleanup_duplicate_items(payload: CleanupPlaidItemsRequest) -> dict:
     for item in items:
         source_key = (item.get("source_hint") or "other").strip().lower()
         institution_key = (item.get("institution_name") or "").strip().lower()
-        group_key = (source_key, institution_key)
+
+        # Chase items are especially prone to stale source_hint drift across reconnects.
+        # Group them by institution only so duplicates are cleaned up safely.
+        if "chase" in institution_key:
+            group_key = ("institution-only", institution_key)
+        else:
+            group_key = (source_key, institution_key)
         grouped.setdefault(group_key, []).append(item)
 
     keep_item_ids: set[str] = set()
@@ -512,9 +655,37 @@ def api_reclassify_sources(payload: ReclassifySourcesRequest) -> dict:
 
 @app.post("/api/plaid/sync/{item_id}")
 def api_sync_item(item_id: str) -> dict:
+    cooldown_remaining = _sync_cooldown_remaining(item_id)
+    if cooldown_remaining > 0:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error_code": "SYNC_COOLDOWN_ACTIVE",
+                "error_message": "Sync requested too frequently for this item.",
+                "retry_after_seconds": cooldown_remaining,
+                "item_id": item_id,
+            },
+        )
+
+    _mark_item_synced_now(item_id)
     try:
         return _sync_item_internal(item_id)
     except Exception as exc:  # pragma: no cover
+        plaid_error = _extract_plaid_error(exc)
+        if plaid_error and plaid_error.get("error_code") == "ITEM_LOGIN_REQUIRED":
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error_code": "ITEM_LOGIN_REQUIRED",
+                    "error_message": plaid_error.get(
+                        "error_message",
+                        "Item requires re-authentication in Plaid Link update mode.",
+                    ),
+                    "needs_reauth": True,
+                    "item_id": item_id,
+                    "reconnect_item_id": item_id,
+                },
+            ) from exc
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
@@ -535,7 +706,7 @@ def api_spend_summary(
     start_date: str | None = Query(default=None),
     end_date: str | None = Query(default=None),
     include_pending: bool = Query(default=False),
-    auto_sync: bool = Query(default=True),
+    auto_sync: bool = Query(default=False),
 ) -> dict:
     auto_sync_meta = {
         "auto_sync_attempted": False,
@@ -572,7 +743,7 @@ def api_spend_transactions(
     end_date: str | None = Query(default=None),
     include_pending: bool = Query(default=False),
     limit: int = Query(default=200, ge=1, le=1000),
-    auto_sync: bool = Query(default=True),
+    auto_sync: bool = Query(default=False),
 ) -> dict:
     normalized_source = source.lower() if source else None
     if normalized_source and normalized_source not in {
@@ -622,7 +793,7 @@ def api_spend_frontend_shape(
     start_date: str | None = Query(default=None),
     end_date: str | None = Query(default=None),
     include_pending: bool = Query(default=False),
-    auto_sync: bool = Query(default=True),
+    auto_sync: bool = Query(default=False),
 ) -> dict:
     normalized_source = source.lower() if source else None
     auto_sync_meta = {

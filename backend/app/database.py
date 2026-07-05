@@ -78,6 +78,14 @@ def init_db() -> None:
         if "source_hint" not in columns:
             conn.execute("ALTER TABLE plaid_items ADD COLUMN source_hint TEXT")
 
+        # Historical sync fallback could write authorized_datetime into account_name.
+        # Clear those timestamp-like values so UI does not show misleading account names.
+        conn.execute("""
+            UPDATE transactions
+            SET account_name = ''
+            WHERE account_name GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9]+[0-9][0-9]:[0-9][0-9]'
+            """)
+
 
 def upsert_plaid_item(
     item_id: str,
@@ -249,14 +257,26 @@ def query_spend_summary(
             ), ranked AS (
                 SELECT
                     *,
+                    COALESCE(
+                        NULLIF(json_extract(raw_json, '$.pending_transaction_id'), ''),
+                        CASE
+                            WHEN pending = 1 THEN plaid_transaction_id
+                            ELSE NULL
+                        END,
+                        source || '|' || COALESCE(date, '') || '|' || CAST(amount AS TEXT) || '|' || COALESCE(merchant_name, '') || '|' || COALESCE(description, '')
+                    ) AS dedupe_key,
                     ROW_NUMBER() OVER (
                         PARTITION BY
                             source,
-                            date,
-                            amount,
-                            COALESCE(merchant_name, ''),
-                            COALESCE(description, '')
-                        ORDER BY updated_at DESC
+                            COALESCE(
+                                NULLIF(json_extract(raw_json, '$.pending_transaction_id'), ''),
+                                CASE
+                                    WHEN pending = 1 THEN plaid_transaction_id
+                                    ELSE NULL
+                                END,
+                                source || '|' || COALESCE(date, '') || '|' || CAST(amount AS TEXT) || '|' || COALESCE(merchant_name, '') || '|' || COALESCE(description, '')
+                            )
+                        ORDER BY pending ASC, updated_at DESC
                     ) AS rn
                 FROM filtered
             )
@@ -275,14 +295,26 @@ def query_spend_summary(
             ), ranked AS (
                 SELECT
                     *,
+                    COALESCE(
+                        NULLIF(json_extract(raw_json, '$.pending_transaction_id'), ''),
+                        CASE
+                            WHEN pending = 1 THEN plaid_transaction_id
+                            ELSE NULL
+                        END,
+                        source || '|' || COALESCE(date, '') || '|' || CAST(amount AS TEXT) || '|' || COALESCE(merchant_name, '') || '|' || COALESCE(description, '')
+                    ) AS dedupe_key,
                     ROW_NUMBER() OVER (
                         PARTITION BY
                             source,
-                            date,
-                            amount,
-                            COALESCE(merchant_name, ''),
-                            COALESCE(description, '')
-                        ORDER BY updated_at DESC
+                            COALESCE(
+                                NULLIF(json_extract(raw_json, '$.pending_transaction_id'), ''),
+                                CASE
+                                    WHEN pending = 1 THEN plaid_transaction_id
+                                    ELSE NULL
+                                END,
+                                source || '|' || COALESCE(date, '') || '|' || CAST(amount AS TEXT) || '|' || COALESCE(merchant_name, '') || '|' || COALESCE(description, '')
+                            )
+                        ORDER BY pending ASC, updated_at DESC
                     ) AS rn
                 FROM filtered
             )
@@ -337,14 +369,26 @@ def query_transactions(
             ), ranked AS (
                 SELECT
                     *,
+                    COALESCE(
+                        NULLIF(json_extract(raw_json, '$.pending_transaction_id'), ''),
+                        CASE
+                            WHEN pending = 1 THEN plaid_transaction_id
+                            ELSE NULL
+                        END,
+                        source || '|' || COALESCE(date, '') || '|' || CAST(amount AS TEXT) || '|' || COALESCE(merchant_name, '') || '|' || COALESCE(description, '')
+                    ) AS dedupe_key,
                     ROW_NUMBER() OVER (
                         PARTITION BY
                             source,
-                            date,
-                            amount,
-                            COALESCE(merchant_name, ''),
-                            COALESCE(description, '')
-                        ORDER BY updated_at DESC
+                            COALESCE(
+                                NULLIF(json_extract(raw_json, '$.pending_transaction_id'), ''),
+                                CASE
+                                    WHEN pending = 1 THEN plaid_transaction_id
+                                    ELSE NULL
+                                END,
+                                source || '|' || COALESCE(date, '') || '|' || CAST(amount AS TEXT) || '|' || COALESCE(merchant_name, '') || '|' || COALESCE(description, '')
+                            )
+                        ORDER BY pending ASC, updated_at DESC
                     ) AS rn
                 FROM filtered
             )
