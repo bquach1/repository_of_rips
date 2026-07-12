@@ -559,14 +559,6 @@ function PlaidConnectPanel({ onLinked }) {
         <button
           type="button"
           className="chip"
-          onClick={() => cleanupDuplicateItems({ removeFromPlaid: false })}
-          disabled={isCleaningItems || linkRateLimitSeconds > 0}
-        >
-          Cleanup Duplicates (Local)
-        </button>
-        <button
-          type="button"
-          className="chip"
           onClick={() => cleanupDuplicateItems({ removeFromPlaid: true })}
           disabled={isCleaningItems || linkRateLimitSeconds > 0}
         >

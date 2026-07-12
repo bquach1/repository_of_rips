@@ -11,4 +11,5 @@ export const CARD_STORE_NAMES = [
   "Andyseous Odyssey",
   "Zenith Tcg",
   "Riot Games",
+  "The Pokemon Company",
 ];
