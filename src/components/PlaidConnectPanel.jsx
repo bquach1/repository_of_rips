@@ -436,43 +436,9 @@ function PlaidConnectPanel({ onLinked }) {
     }
   };
 
-  const reclassifySources = async () => {
-    try {
-      setIsCleaningItems(true);
-      setError("");
-      setCleanupMessage("");
-
-      const response = await fetch(
-        `${BACKEND_BASE_URL}/api/plaid/reclassify-sources`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            user_id: "local-user",
-            dry_run: false,
-          }),
-        },
-      );
-
-      if (!response.ok) {
-        throw new Error(`Reclassify failed (${response.status})`);
-      }
-
-      const payload = await response.json();
-      setCleanupMessage(
-        `Reclassified ${payload.updated_transactions} of ${payload.checked_transactions} transactions.`,
-      );
-      await onLinked();
-    } catch (err) {
-      setError(err.message || "Failed to reclassify transactions.");
-    } finally {
-      setIsCleaningItems(false);
-    }
-  };
-
   return (
     <section className="surface plaid-connect">
-      <h2>Connect Venmo / Chase / Zelle (Plaid)</h2>
+      <h2>Connect Chase or Venmo</h2>
       <p>
         Use Plaid Link to connect your institutions. After linking, the app
         syncs transactions and refreshes spend summary automatically.
@@ -492,13 +458,6 @@ function PlaidConnectPanel({ onLinked }) {
           onClick={() => openWithSource("chase")}
         >
           Connect Chase
-        </button>
-        <button
-          type="button"
-          className="chip chip-active"
-          onClick={() => openWithSource("zelle")}
-        >
-          Connect Zelle (via Bank)
         </button>
         <button
           type="button"
@@ -563,14 +522,6 @@ function PlaidConnectPanel({ onLinked }) {
           disabled={isCleaningItems || linkRateLimitSeconds > 0}
         >
           Cleanup Duplicates (Local + Plaid)
-        </button>
-        <button
-          type="button"
-          className="chip"
-          onClick={reclassifySources}
-          disabled={isCleaningItems || linkRateLimitSeconds > 0}
-        >
-          Reclassify Sources
         </button>
       </div>
 
