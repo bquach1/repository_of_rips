@@ -25,7 +25,7 @@ const SPEND_FETCH_LIMIT = 1000;
 const MAX_RECENT_RECORDS = 100;
 const RECENT_TRANSACTIONS_PAGE_SIZE = 10;
 const CARD_GRID_PAGE_SIZE = 25;
-const MANUAL_ZELLE_RECEIVED = 40 - 7;
+const MANUAL_ZELLE_RECEIVED = 63;
 
 function parseZelleTransaction(tx) {
   const description = String(tx.description || tx.merchant_name || "").trim();
@@ -512,7 +512,7 @@ export default function PortfolioPage() {
                     <p>{money(zelleBreakdown.sent)}</p>
                   </article>
                   <article>
-                    <h3>Zelle Manual Received (Hardcoded)</h3>
+                    <h3>Zelle Manual Profit Adjustment</h3>
                     <p>{money(zelleBreakdown.manualReceived)}</p>
                   </article>
                   <article>
