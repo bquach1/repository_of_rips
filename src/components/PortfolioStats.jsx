@@ -5,7 +5,9 @@ export default function PortfolioStats({
   totalQuantity,
   totalValue,
   totalDelta,
+  selectedGame,
 }) {
+  console.log(selectedGame);
   return (
     <section className="surface stats-grid" aria-label="Portfolio summary">
       <article>
@@ -20,10 +22,12 @@ export default function PortfolioStats({
         <h3>Portfolio Value</h3>
         <p>{money(totalValue)}</p>
       </article>
-      <article className={totalDelta >= 0 ? "delta-up" : "delta-down"}>
-        <h3>Total Delta</h3>
-        <p>{money(totalDelta)}</p>
-      </article>
+      {selectedGame?.toLowerCase() === "all" && (
+        <article className={totalDelta >= 0 ? "delta-up" : "delta-down"}>
+          <h3>Total Delta</h3>
+          <p>{money(totalDelta)}</p>
+        </article>
+      )}
     </section>
   );
 }

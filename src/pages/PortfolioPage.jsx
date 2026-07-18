@@ -435,9 +435,9 @@ export default function PortfolioPage() {
       cardCount: filteredCards.length,
       totalQuantity,
       totalValue,
-      totalDelta,
+      ...(selectedGame === "All" ? { totalDelta } : {}),
     };
-  }, [filteredCards, cardStoreTotalSpend, venmoBreakdown]);
+  }, [filteredCards, cardStoreTotalSpend, venmoBreakdown, selectedGame]);
 
   return (
     <main className="app-shell">
@@ -625,7 +625,7 @@ export default function PortfolioPage() {
               onSelectGame={onSelectGame}
             />
           </section>
-          <PortfolioStats {...totals} />
+          <PortfolioStats {...totals} selectedGame={selectedGame} />
           <CollectrCardGrid cards={paginatedCards} />
           {filteredCards.length > 0 && (
             <section className="surface card-grid-pagination-wrap">
