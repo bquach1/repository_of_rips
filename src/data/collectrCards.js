@@ -1,28 +1,66 @@
 export const COLLECTR_EXPORT_PATH = "/collectr-portfolio-latest.json";
 
+const GAME_BY_SET_KEYWORD = [
+  // One Piece sets
+  ["adventure on kami", "One Piece"],
+  ["carrying on his will", "One Piece"],
+  ["the time of battle", "One Piece"],
+  ["the azure sea", "One Piece"],
+  // Riftbound sets
+  ["riftbound", "Riftbound"],
+  ["spiritforged", "Riftbound"],
+  ["pitch black", "Riftbound"],
+  ["vendetta", "Riftbound"],
+  ["origins", "Riftbound"],
+  ["unleashed", "Riftbound"],
+  // Pokemon sets
+  ["pokemon", "Pokemon"],
+  ["30th celebration", "Pokemon"],
+  ["chaos rising", "Pokemon"],
+];
+
+function inferBySet(text) {
+  for (const [keyword, game] of GAME_BY_SET_KEYWORD) {
+    if (text.includes(keyword)) return game;
+  }
+  return "";
+}
+
 function inferGame(card) {
-  const text = [card.name, card.set, card.rarity, card.cardNumber]
+  const text = [card.name, card.set, card.rarity, card.cardNumber, card.finish]
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
 
+  const setFirst = inferBySet(String(card.set || "").toLowerCase());
+  if (setFirst) {
+    return setFirst;
+  }
+
+  const onePieceCode = /\b(?:op|eb|prb|st)\d{2}[- ]?\d{3}\b/i;
+  if (onePieceCode.test(text)) {
+    return "One Piece";
+  }
+
   if (
-    /\b(op\d{2}|eb\d{2}|prb\d{2}|sec|sr|tr|the azure sea|adventure on kami)/i.test(
-      text,
-    )
+    /\bone piece\b|don\!\!|leader card|character card/i.test(text)
   ) {
     return "One Piece";
   }
 
   if (
-    /pokemon|elite trainer box|booster bundle|illustration rare|special illustration rare|holofoil|\d{3}\/\d{3}/i.test(
+    /pokemon|elite trainer box|booster bundle|illustration rare|special illustration rare|holofoil|\bex\b|vmax|vstar|trainer box/i.test(
       text,
     )
   ) {
     return "Pokemon";
   }
 
-  if (/riftbound|spiritforged|origins|unleashed|epic|showcase/i.test(text)) {
+  if (
+    /riftbound|spiritforged|pitch black|vendetta|origins|unleashed|overnumbered|showcase/i.test(
+      text,
+    )
+  ) {
     return "Riftbound";
   }
 

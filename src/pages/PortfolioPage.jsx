@@ -25,7 +25,7 @@ const SPEND_FETCH_LIMIT = 1000;
 const MAX_RECENT_RECORDS = 100;
 const RECENT_TRANSACTIONS_PAGE_SIZE = 10;
 const CARD_GRID_PAGE_SIZE = 25;
-const MANUAL_ZELLE_RECEIVED = 63;
+const MANUAL_ZELLE_RECEIVED = 73;
 
 function parseZelleTransaction(tx) {
   const description = String(tx.description || tx.merchant_name || "").trim();
