@@ -13,4 +13,5 @@ export const CARD_STORE_NAMES = [
   "Riot Games",
   "The Pokemon Company",
   "Boardwalk Games",
+  "Mt Moon Collectibles",
 ];

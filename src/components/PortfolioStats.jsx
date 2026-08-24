@@ -7,7 +7,6 @@ export default function PortfolioStats({
   totalDelta,
   selectedGame,
 }) {
-  console.log(selectedGame);
   return (
     <section className="surface stats-grid" aria-label="Portfolio summary">
       <article>

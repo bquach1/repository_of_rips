@@ -75,7 +75,7 @@ function PlaidConnectPanel({ onLinked }) {
         .trim()
         .toLowerCase();
 
-      const isChase = institution === "chase" && hint === "chase";
+      const isChase = institution === "chase";
       const isVenmoPersonal =
         (institution === "venmo - personal" ||
           institution === "venmo personal") &&
@@ -566,8 +566,8 @@ function PlaidConnectPanel({ onLinked }) {
           ))}
           {filteredLinkedItems.length === 0 ? (
             <p className="plaid-status">
-              No eligible connections found. Keep only Chase (chase) and Venmo -
-              Personal (venmo).
+              No eligible connections found. Keep only Chase (any hint) and
+              Venmo - Personal (venmo).
             </p>
           ) : null}
         </div>
