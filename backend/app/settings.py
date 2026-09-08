@@ -78,7 +78,7 @@ class Settings:
         )
         self.venmo_card_keywords = env_keyword_list(
             "VENMO_CARD_KEYWORDS",
-            "(card|cards|tcg|pokemon|one piece|riftbound|booster|pack|box|single|slab|psa|bgs|cgc|whatnot|tcgplayer|collectr|rip|op\d{2,4}|op\d{2,4}-?\d{3,4}|Mr 3)",
+            "(card|cards|tcg|pokemon|one piece|riftbound|booster|pack|box|single|slab|psa|bgs|cgc|prerelease|Pre release|whatnot|tcgplayer|collectr|rip|op\d{2,4}|op\d{2,4}-?\d{3,4}|Mr 3)",
         )
         self.venmo_non_card_keywords = env_csv(
             "VENMO_NON_CARD_KEYWORDS",
