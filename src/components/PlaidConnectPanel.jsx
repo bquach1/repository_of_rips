@@ -313,7 +313,7 @@ function PlaidConnectPanel({ onLinked }) {
       case "error":
         return "Connection failed.";
       default:
-        return "Waiting to start...";
+        return "Connected and synced.";
     }
   }, [status]);
 
@@ -438,7 +438,7 @@ function PlaidConnectPanel({ onLinked }) {
 
   return (
     <section className="surface plaid-connect">
-      <h2>Connect Chase or Venmo</h2>
+      <h2>Connect Financial Institutions</h2>
       <p>
         Use Plaid Link to connect your institutions. After linking, the app
         syncs transactions and refreshes spend summary automatically.

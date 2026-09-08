@@ -60,6 +60,12 @@ function parseArgs(argv) {
     } else if (arg === "--url") {
       options.portfolioUrl = argv[i + 1] || options.portfolioUrl;
       i += 1;
+    } else if (arg === "--user") {
+      const username = (argv[i + 1] || "").replace(/^@/, "");
+      if (username) {
+        options.portfolioUrl = `https://app.getcollectr.com/showcase/profile/@${username}`;
+      }
+      i += 1;
     }
   }
 
