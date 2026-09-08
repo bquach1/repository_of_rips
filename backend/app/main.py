@@ -9,7 +9,6 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from .database import (
-    delete_item_and_transactions,
     delete_transactions_by_ids,
     get_item,
     init_db,
@@ -27,12 +26,10 @@ from .plaid_service import (
     create_link_token,
     exchange_public_token,
     infer_source,
-    remove_item,
     sync_transactions,
 )
 from .schemas import (
     AccountSourceMapRequest,
-    CleanupPlaidItemsRequest,
     ExchangePublicTokenRequest,
     LinkTokenRequest,
     ReclassifySourcesRequest,
@@ -501,105 +498,6 @@ def api_exchange_public_token(payload: ExchangePublicTokenRequest) -> dict:
 @app.get("/api/plaid/items")
 def api_list_items() -> dict:
     return {"items": list_items()}
-
-
-@app.post("/api/plaid/cleanup-duplicates")
-def api_cleanup_duplicate_items(payload: CleanupPlaidItemsRequest) -> dict:
-    items = [item for item in list_items() if item.get("user_id") == payload.user_id]
-
-    grouped: dict[tuple[str, str], list[dict]] = {}
-    for item in items:
-        source_key = (item.get("source_hint") or "other").strip().lower()
-        institution_key = (item.get("institution_name") or "").strip().lower()
-
-        # Chase items are especially prone to stale source_hint drift across reconnects.
-        # Group them by institution only so duplicates are cleaned up safely.
-        if "chase" in institution_key:
-            group_key = ("institution-only", institution_key)
-        else:
-            group_key = (source_key, institution_key)
-        grouped.setdefault(group_key, []).append(item)
-
-    keep_item_ids: set[str] = set()
-    candidate_duplicates: list[dict] = []
-
-    for group_items in grouped.values():
-        sorted_group = sorted(
-            group_items,
-            key=lambda row: row.get("created_at") or "",
-            reverse=True,
-        )
-        if not sorted_group:
-            continue
-        keep_item_ids.add(sorted_group[0]["item_id"])
-        candidate_duplicates.extend(sorted_group[1:])
-
-    removed_items: list[dict] = []
-    skipped_items: list[dict] = []
-
-    for item in candidate_duplicates:
-        item_id = item["item_id"]
-        item_record = get_item(item_id)
-        if not item_record:
-            skipped_items.append(
-                {
-                    "item_id": item_id,
-                    "reason": "Item no longer exists",
-                }
-            )
-            continue
-
-        if payload.dry_run:
-            removed_items.append(
-                {
-                    "item_id": item_id,
-                    "institution_name": item.get("institution_name"),
-                    "source_hint": item.get("source_hint") or "other",
-                    "removed_from_plaid": False,
-                    "removed_local": False,
-                    "dry_run": True,
-                }
-            )
-            continue
-
-        plaid_removed = False
-        if payload.remove_from_plaid:
-            try:
-                remove_item(item_record["access_token"])
-                plaid_removed = True
-            except Exception as exc:  # pragma: no cover
-                skipped_items.append(
-                    {
-                        "item_id": item_id,
-                        "reason": f"Plaid remove failed: {exc}",
-                    }
-                )
-                continue
-
-        local_result = delete_item_and_transactions(item_id)
-        removed_items.append(
-            {
-                "item_id": item_id,
-                "institution_name": item.get("institution_name"),
-                "source_hint": item.get("source_hint") or "other",
-                "removed_from_plaid": plaid_removed,
-                "removed_local": bool(local_result["item_deleted"]),
-                "transactions_deleted": local_result["transactions_deleted"],
-            }
-        )
-
-    return {
-        "user_id": payload.user_id,
-        "dry_run": payload.dry_run,
-        "remove_from_plaid": payload.remove_from_plaid,
-        "total_items": len(items),
-        "kept_items": len(keep_item_ids),
-        "duplicate_candidates": len(candidate_duplicates),
-        "removed_count": len(removed_items),
-        "skipped_count": len(skipped_items),
-        "removed_items": removed_items,
-        "skipped_items": skipped_items,
-    }
 
 
 @app.post("/api/plaid/reclassify-sources")

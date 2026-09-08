@@ -17,12 +17,6 @@ class ExchangePublicTokenRequest(BaseModel):
     source_hint: str | None = None
 
 
-class CleanupPlaidItemsRequest(BaseModel):
-    user_id: str = Field(default="local-user")
-    dry_run: bool = False
-    remove_from_plaid: bool = False
-
-
 class ReclassifySourcesRequest(BaseModel):
     user_id: str = Field(default="local-user")
     dry_run: bool = False

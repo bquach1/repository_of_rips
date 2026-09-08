@@ -12,8 +12,6 @@ function PlaidConnectPanel({ onLinked }) {
   const [linkedItems, setLinkedItems] = useState([]);
   const [isLoadingItems, setIsLoadingItems] = useState(false);
   const [lastMode, setLastMode] = useState("new");
-  const [isCleaningItems, setIsCleaningItems] = useState(false);
-  const [cleanupMessage, setCleanupMessage] = useState("");
   const [showLaunchPrompt, setShowLaunchPrompt] = useState(false);
   const [launchPromptText, setLaunchPromptText] = useState("");
   const [preparedToken, setPreparedToken] = useState("");
@@ -400,42 +398,6 @@ function PlaidConnectPanel({ onLinked }) {
     }
   };
 
-  const cleanupDuplicateItems = async ({ removeFromPlaid }) => {
-    try {
-      setIsCleaningItems(true);
-      setError("");
-      setCleanupMessage("");
-
-      const response = await fetch(
-        `${BACKEND_BASE_URL}/api/plaid/cleanup-duplicates`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            user_id: "local-user",
-            dry_run: false,
-            remove_from_plaid: removeFromPlaid,
-          }),
-        },
-      );
-
-      if (!response.ok) {
-        throw new Error(`Cleanup failed (${response.status})`);
-      }
-
-      const payload = await response.json();
-      setCleanupMessage(
-        `Cleanup complete. Removed ${payload.removed_count} duplicate item(s); skipped ${payload.skipped_count}.`,
-      );
-      await fetchLinkedItems();
-      await onLinked();
-    } catch (err) {
-      setError(err.message || "Failed to clean duplicate Plaid items.");
-    } finally {
-      setIsCleaningItems(false);
-    }
-  };
-
   return (
     <section className="surface plaid-connect">
       <h2>Connect Financial Institutions</h2>
@@ -477,9 +439,20 @@ function PlaidConnectPanel({ onLinked }) {
         </button>
       </div>
 
-      <p className="plaid-status">Status: {statusText}</p>
-      <p className="plaid-status">Source tag for next link: {sourceHint}</p>
-      <p className="plaid-status">Link mode: {lastMode}</p>
+      <div className="plaid-status-grid">
+        <div>
+          <span>Status</span>
+          <strong>{statusText}</strong>
+        </div>
+        <div>
+          <span>Next source</span>
+          <strong>{sourceHint}</strong>
+        </div>
+        <div>
+          <span>Link mode</span>
+          <strong>{lastMode}</strong>
+        </div>
+      </div>
       {linkRateLimitSeconds > 0 ? (
         <p className="plaid-status">
           Plaid rate limit active. You can request a new token in{" "}
@@ -511,17 +484,9 @@ function PlaidConnectPanel({ onLinked }) {
         </div>
       ) : null}
 
-      <div className="plaid-actions">
+      <div className="plaid-secondary-actions">
         <button type="button" className="chip" onClick={fetchLinkedItems}>
           Refresh Existing Connections
-        </button>
-        <button
-          type="button"
-          className="chip"
-          onClick={() => cleanupDuplicateItems({ removeFromPlaid: true })}
-          disabled={isCleaningItems || linkRateLimitSeconds > 0}
-        >
-          Cleanup Duplicates (Local + Plaid)
         </button>
       </div>
 
@@ -534,36 +499,42 @@ function PlaidConnectPanel({ onLinked }) {
       {!isLoadingItems && linkedItems.length > 0 ? (
         <div>
           <h3>Existing Connections</h3>
-          {filteredLinkedItems.map((item) => (
-            <div key={item.item_id} className="plaid-actions">
-              <span className="plaid-status">
-                {item.institution_name || "Unknown institution"} (
-                {item.source_hint || "other"})
-              </span>
-              <button
-                type="button"
-                className="chip"
-                onClick={() =>
-                  openWithSource(item.source_hint || "other", {
-                    reconnectItemId: item.item_id,
-                  })
-                }
-                disabled={linkRateLimitSeconds > 0}
-              >
-                Reconnect Existing
-              </button>
-              <button
-                type="button"
-                className="chip"
-                onClick={() => syncExistingItem(item)}
-                disabled={getSyncCooldownSeconds(item.item_id) > 0}
-              >
-                {getSyncCooldownSeconds(item.item_id) > 0
-                  ? `Sync Existing (${getSyncCooldownSeconds(item.item_id)}s)`
-                  : "Sync Existing"}
-              </button>
-            </div>
-          ))}
+          <div className="plaid-connection-list">
+            {filteredLinkedItems.map((item) => (
+              <div key={item.item_id} className="plaid-connection">
+                <div>
+                  <strong>
+                    {item.institution_name || "Unknown institution"}
+                  </strong>
+                  <span>{item.source_hint || "other"}</span>
+                </div>
+                <div className="plaid-connection-actions">
+                  <button
+                    type="button"
+                    className="chip"
+                    onClick={() =>
+                      openWithSource(item.source_hint || "other", {
+                        reconnectItemId: item.item_id,
+                      })
+                    }
+                    disabled={linkRateLimitSeconds > 0}
+                  >
+                    Reconnect
+                  </button>
+                  <button
+                    type="button"
+                    className="chip"
+                    onClick={() => syncExistingItem(item)}
+                    disabled={getSyncCooldownSeconds(item.item_id) > 0}
+                  >
+                    {getSyncCooldownSeconds(item.item_id) > 0
+                      ? `Sync (${getSyncCooldownSeconds(item.item_id)}s)`
+                      : "Sync"}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
           {filteredLinkedItems.length === 0 ? (
             <p className="plaid-status">
               No eligible connections found. Keep only Chase (any hint) and
@@ -572,7 +543,6 @@ function PlaidConnectPanel({ onLinked }) {
           ) : null}
         </div>
       ) : null}
-      {cleanupMessage ? <p className="plaid-status">{cleanupMessage}</p> : null}
       {error ? <p className="spend-error">{error}</p> : null}
     </section>
   );

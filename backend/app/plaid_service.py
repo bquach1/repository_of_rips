@@ -10,7 +10,6 @@ from plaid.model.item_public_token_exchange_request import (
 from plaid.model.link_token_create_request import LinkTokenCreateRequest
 from plaid.model.link_token_create_request_user import LinkTokenCreateRequestUser
 from plaid.model.products import Products
-from plaid.model.item_remove_request import ItemRemoveRequest
 from plaid.model.transactions_sync_request import TransactionsSyncRequest
 
 from .database import get_account_source
@@ -73,13 +72,6 @@ def exchange_public_token(public_token: str) -> dict:
     client = get_plaid_client()
     req = ItemPublicTokenExchangeRequest(public_token=public_token)
     response = client.item_public_token_exchange(req)
-    return response.to_dict()
-
-
-def remove_item(access_token: str) -> dict:
-    client = get_plaid_client()
-    req = ItemRemoveRequest(access_token=access_token)
-    response = client.item_remove(req)
     return response.to_dict()
 
 
