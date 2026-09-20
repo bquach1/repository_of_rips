@@ -261,7 +261,6 @@ export default function PortfolioPage() {
       return Number(a.amount || 0) - Number(b.amount || 0);
     });
 
-    const cardIncomingPool = [];
     let loss = 0;
     let profit = 0;
 
@@ -280,34 +279,14 @@ export default function PortfolioPage() {
       }
 
       if (isStandardTransfer) {
-        if (amount <= 0) {
-          continue;
-        }
-
-        let remainingTransfer = amount;
-
-        for (const candidate of cardIncomingPool) {
-          if (remainingTransfer <= 0) {
-            break;
-          }
-          if (candidate.unmatched <= 0) {
-            continue;
-          }
-
-          const matchAmount = Math.min(candidate.unmatched, remainingTransfer);
-          candidate.unmatched -= matchAmount;
-          remainingTransfer -= matchAmount;
-          profit += matchAmount;
-        }
-
         continue;
       }
 
       if (keywordMatches.length > 0) {
         if (amount < 0) {
-          loss += Math.abs(amount);
+          profit += Math.abs(amount);
         } else {
-          cardIncomingPool.push({ unmatched: amount });
+          loss += amount;
         }
       }
     }
