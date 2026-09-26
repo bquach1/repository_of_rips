@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePlaidLink } from "react-plaid-link";
 
 const BACKEND_BASE_URL =
-  import.meta.env.VITE_BACKEND_BASE_URL || "http://localhost:8000";
+  process.env.NEXT_PUBLIC_BACKEND_BASE_URL || "http://localhost:8000";
 
 function PlaidConnectPanel({ onLinked }) {
   const [linkToken, setLinkToken] = useState("");

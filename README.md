@@ -1,6 +1,6 @@
 # repository_of_rips
 
-React app for tracking card collection profit/loss by category (One Piece, Pokemon, Riftbound).
+Next.js app for tracking card collection profit/loss by category (One Piece, Pokemon, Riftbound).
 
 ## Features
 
@@ -36,6 +36,8 @@ or:
 npm install
 npm run dev
 ```
+
+The frontend runs on `http://localhost:3000`. Set `NEXT_PUBLIC_BACKEND_BASE_URL` in `.env.local` to override the backend URL; it defaults to `http://localhost:8000`.
 
 ## Plaid Backend (Venmo + Chase Spend)
 
@@ -112,7 +114,7 @@ Output files are written to `exports/`:
 - `collectr-portfolio-YYYY-MM-DD.json`
 - `collectr-portfolio-YYYY-MM-DD.csv`
 
-The latest JSON is also synced to `public/collectr-portfolio-latest.json` so the React UI can render the real export data directly.
+The latest JSON is also synced to `public/collectr-portfolio-latest.json` so the Next.js UI can render the real export data directly.
 
 The script also saves login session state at `.auth/collectr-storage-state.json` to reduce repeated logins.
 

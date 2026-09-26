@@ -69,7 +69,10 @@ class Settings:
     openai_model: str = env_str("OPENAI_MODEL", "gpt-4.1-mini")
 
     def __post_init__(self) -> None:
-        origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173")
+        origins = os.getenv(
+            "ALLOWED_ORIGINS",
+            "http://localhost:3000,http://localhost:5173",
+        )
         self.allowed_origins = [o.strip() for o in origins.split(",") if o.strip()]
 
         self.venmo_card_counterparties = env_csv(

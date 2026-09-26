@@ -1,3 +1,5 @@
+"use client";
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button, Segmented, Spin } from "antd";
 import CollectrCardGrid from "../components/CollectrCardGrid";
@@ -19,7 +21,7 @@ import {
 } from "../utils/helpers";
 
 const BACKEND_BASE_URL =
-  import.meta.env.VITE_BACKEND_BASE_URL || "http://localhost:8000";
+  process.env.NEXT_PUBLIC_BACKEND_BASE_URL || "http://localhost:8000";
 
 const SPEND_FETCH_LIMIT = 1000;
 const MAX_RECENT_RECORDS = 100;
@@ -432,7 +434,7 @@ export default function PortfolioPage() {
 
       {loadStatus === "loading" && (
         <Spin
-          tip="Loading portfolio data..."
+          description="Loading portfolio data..."
           size="large"
           className="loading-spinner"
           style={{
