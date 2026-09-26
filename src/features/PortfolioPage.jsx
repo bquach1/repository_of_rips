@@ -461,7 +461,16 @@ export default function PortfolioPage() {
           <section className="surface">
             <h2>Spend Sync Snapshot</h2>
             {spendStatus === "loading" && (
-              <p>Loading spend summary and transactions...</p>
+              <Spin
+                description="Loading spend summary and transactions..."
+                size="large"
+                className="loading-spinner"
+                style={{
+                  display: "flex",
+                  justifyContent: "center",
+                  margin: "2rem 0",
+                }}
+              />
             )}
             {spendStatus === "error" && (
               <p className="spend-error">
