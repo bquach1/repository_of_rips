@@ -39,6 +39,14 @@ npm run dev
 
 The frontend runs on `http://localhost:3000`. Set `NEXT_PUBLIC_BACKEND_BASE_URL` in `.env.local` to override the backend URL; it defaults to `http://localhost:8000`.
 
+## Deployment
+
+Frontend is on Vercel, backend on Render (`https://repository-of-rips.onrender.com`).
+
+- Vercel env: `NEXT_PUBLIC_BACKEND_BASE_URL=https://repository-of-rips.onrender.com` (inlined at build time, so redeploy after changing it)
+- Render env: `ALLOWED_ORIGINS` must list the exact Vercel origin, no trailing slash
+- Render needs a persistent disk mounted for `backend/plaid_spend.db`, otherwise linked Plaid items are lost on each deploy
+
 ## Plaid Backend (Venmo + Chase Spend)
 
 Python backend lives in `backend/` and provides endpoints for Plaid Link token creation, public token exchange, transaction sync, and spend totals.
